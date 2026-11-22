@@ -108,3 +108,5 @@ Nexura since it last read them. `.env*` and `.git/` are never writable and never
 Answer with `POST /runs/{id}/approve`.
 
 For a run that is not active in this server process, `GET /runs/{id}/events` replays the stored lifecycle events instead.
+
+V3 events on the run stream: `budget_estimate {steps, requests, tokens}` (cost estimate shown before the plan is approved), `budget_reached {reason}` (the usage cap stopped the run; resume it later), `git_committed {branch, commit, previous, files}` and `git_commit_skipped {reason}` (only when `commit: true` was sent).

@@ -54,6 +54,10 @@
         "nexura.retrievalMode": { "type": "string", "enum": ["v1", "v2"], "default": "v1", "description": "v1: the basic context. v2: retrieval from the code index (falls back to v1 when the index is not ready)." },
         "nexura.patchMode": { "type": "string", "enum": ["v1", "v2"], "default": "v1", "description": "v2: Nexura edits existing files with multi-hunk patches that match exactly one place and keep line endings." },
         "nexura.baseline": { "type": "string", "enum": ["ask", "always", "never"], "default": "ask", "description": "Run the project's own test command before and after a run to detect regressions." },
+        "nexura.commitOnSuccess": { "type": "boolean", "default": false, "description": "When every task of a run is verified (and there is no regression), commit the files Nexura changed on a new branch nexura/<run id>. It never pushes and never includes your other changes, but it does switch your folder to that branch (git switch back to return; the folder then shows the files without Nexura's changes). Off by default." },
+        "nexura.budget.maxRequests": { "type": "number", "minimum": 0, "default": 0, "description": "Free-tier quota guard: stop (pausing the run, resumable) once this many model requests were made in the time window across all runs. 0 = no limit. Example: 450 for a key limited to 500 requests per day. Run 'Nexura: Restart Backend' after changing." },
+        "nexura.budget.maxTokens": { "type": "number", "minimum": 0, "default": 0, "description": "Same as above, for tokens. 0 = no limit. Run 'Nexura: Restart Backend' after changing." },
+        "nexura.budget.windowHours": { "type": "number", "minimum": 1, "default": 24, "description": "Length of the rolling window the budget limits apply to, in hours. Run 'Nexura: Restart Backend' after changing." },
         "nexura.pythonPath": { "type": "string", "default": "", "description": "Python 3.11+ used to run the Nexura backend. Empty: use the Python extension's interpreter, else a private virtual environment." },
         "nexura.protectedPaths": {
           "type": "array",

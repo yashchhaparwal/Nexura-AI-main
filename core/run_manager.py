@@ -61,7 +61,8 @@ def _map_db_event(e: dict) -> list[tuple[str, dict]]:
         return [(t, {"task_id": tid, **d})]
     if t in ("retrieval", "retrieval_fallback", "index_updated", "index_update_failed", "index_refreshed",     # V2 (debug detail)
              "baseline_started", "baseline_recorded", "baseline_skipped", "regression_detected", "regression_check",
-             "planner_context", "summary_generated", "summary_failed"):
+             "planner_context", "summary_generated", "summary_failed",
+             "budget_estimate", "budget_reached", "git_committed", "git_commit_skipped"):   # V3: usage budget and --commit
         return [(t, {"task_id": tid, **d})]
     return []
 

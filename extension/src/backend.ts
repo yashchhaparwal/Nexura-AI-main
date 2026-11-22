@@ -163,6 +163,10 @@ export class BackendManager implements vscode.Disposable {
       NEXURA_INDEXING_ENABLED: cfg.get<boolean>("indexing.enabled") ? "true" : "false",
       NEXURA_RETRIEVAL_MODE: cfg.get<string>("retrievalMode") || "v1",
       NEXURA_PATCH_MODE: cfg.get<string>("patchMode") || "v1",
+      // V3 usage budget (0 = no limit); always set explicitly so a value in the parent environment cannot leak in
+      NEXURA_BUDGET_MAX_REQUESTS: String(Math.max(0, Math.floor(cfg.get<number>("budget.maxRequests") || 0))),
+      NEXURA_BUDGET_MAX_TOKENS: String(Math.max(0, Math.floor(cfg.get<number>("budget.maxTokens") || 0))),
+      NEXURA_BUDGET_WINDOW_HOURS: String(Math.max(1, Math.floor(cfg.get<number>("budget.windowHours") || 24))),
     };
     if (this.ctx.globalState.get<boolean>("nexura.modelDownloadConsent")) env.NEXURA_ALLOW_MODEL_DOWNLOAD = "1";
     const gemini = await this.ctx.secrets.get(SECRET_GEMINI);

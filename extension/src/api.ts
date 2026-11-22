@@ -73,6 +73,7 @@ export interface StartRunBody {
   dirty_files: string[];
   git_init: boolean;
   baseline?: boolean;
+  commit?: boolean;   // commit the verified run on a new branch nexura/<run id> (never pushed)
 }
 
 export class ApiClient {

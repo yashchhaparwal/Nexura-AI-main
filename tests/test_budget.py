@@ -118,3 +118,13 @@ def test_run_pauses_cleanly_at_the_cap_and_can_be_resumed(env, monkeypatch):    
     caps(monkeypatch)                                                                 # budget lifted: the run can continue
     _, state = prepare_resume(env.sm, ctx.run_id, require_git=False)
     assert state["resuming"] and state["current_task_index"] == 0
+
+
+def test_budget_and_git_events_reach_the_api_stream():
+    """The extension shows these; the server only forwards the event types it knows."""
+    from core.run_manager import _map_db_event
+    for t, data in (("budget_estimate", {"steps": 2, "requests": 10, "tokens": 26000.0}), ("budget_reached", {"reason": "request budget reached"}),
+                    ("git_committed", {"branch": "nexura/r", "commit": "abc", "previous": "main", "files": 1}),
+                    ("git_commit_skipped", {"reason": "x"})):
+        out = _map_db_event({"type": t, "task_id": None, "data": data})
+        assert [name for name, _ in out] == [t] and out[0][1]["task_id"] is None and all(out[0][1][k] == v for k, v in data.items())

@@ -138,6 +138,7 @@ export class RunController implements vscode.Disposable {
       try {
         const { run_id } = await client.createRun({
           workspace_id, prompt, git_init: gitInit, dirty_policy: dirtyPolicy, dirty_files: dirtyFiles, baseline,
+          commit: vscode.workspace.getConfiguration("nexura").get<boolean>("commitOnSuccess") ?? false,
           approval_level: vscode.workspace.getConfiguration("nexura").get<string>("approvalLevel") ?? "ask_risky",
         });
         this.attach(run_id, prompt, client);
@@ -259,6 +260,19 @@ export class RunController implements vscode.Disposable {
         break;
       case "regression_check":
         this.add("ok", String(d.message));
+        break;
+      case "budget_estimate":
+        this.add("info", `Estimated cost of this plan: about ${d.requests} model requests and ${Number(d.tokens).toLocaleString()} tokens.`);
+        break;
+      case "budget_reached":
+        this.add("warn", `Usage budget reached: ${d.reason} The run is paused: use "Nexura: Resume" later.`);
+        void vscode.window.showWarningMessage(`Nexura: usage budget reached. ${d.reason}`);
+        break;
+      case "git_committed":
+        this.add("ok", `Committed ${d.files} file(s) as ${d.commit} on new branch ${d.branch} (not pushed). Your folder is now on that branch; "git switch ${d.previous}" goes back.`);
+        break;
+      case "git_commit_skipped":
+        this.add("warn", `Not committed: ${d.reason}`);
         break;
     }
     this.syncing = this.syncing.then(() => this.sync(client));

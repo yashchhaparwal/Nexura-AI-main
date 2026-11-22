@@ -53,6 +53,9 @@ as done when its acceptance checks actually pass.
 | `nexura.retrievalMode` | `v1` | `v2` uses the code index for context and planning (falls back to v1 if the index is not ready) |
 | `nexura.patchMode` | `v1` | `v2`: multi-hunk patches that match exactly one place and keep line endings |
 | `nexura.baseline` | `ask` | `ask`, `always` or `never`: run the project's tests before and after a run to catch regressions |
+| `nexura.commitOnSuccess` | `false` | When every task is verified, commit the changed files on a new branch `nexura/<run id>` (never pushed, your other changes are not included). It switches the folder to that branch; `git switch` back to return. |
+| `nexura.budget.maxRequests` / `maxTokens` | `0` (no limit) | Free-tier guard: pause the run (resumable with *Nexura: Resume*) once this many model requests / tokens were used in the window, across all runs. E.g. `450` for a key limited to 500 requests a day. Restart the backend after changing. |
+| `nexura.budget.windowHours` | `24` | Length of that rolling window |
 
 ## Existing projects
 
