@@ -100,6 +100,67 @@ def test_retried_attempts_are_logged_so_the_usage_budget_counts_them(monkeypatch
     assert failure is None and logged == ["retry_after_rate_limit", "retry_after_rate_limit", "ok"]   # 3 requests were made
 
 
+def test_call_with_deadline_returns_raises_and_abandons():
+    import threading
+    assert llm.call_with_deadline(lambda: 42, 2) == 42
+    with pytest.raises(ValueError, match="boom"):
+        llm.call_with_deadline(lambda: (_ for _ in ()).throw(ValueError("boom")), 2)
+    stall = threading.Event()
+    start = time.monotonic()
+    with pytest.raises(TimeoutError, match="timed out"):
+        llm.call_with_deadline(lambda: stall.wait(30), 0.2)
+    assert time.monotonic() - start < 5          # did not wait for the stalled call
+    stall.set()                                  # let the abandoned thread finish
+
+
+def test_a_stalled_model_call_is_cut_off_and_retried(monkeypatch):
+    """A live eval hung ~53 min on one stalled request: the call now has a hard deadline and the stall is retried like any timeout."""
+    import threading
+    stall = threading.Event()
+    monkeypatch.setattr(config, "LLM_HARD_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    fake = FakeChatModel(script=[lambda: stall.wait(30), tool_call_msg("task_complete", {"summary": "x"})], calls=[])
+    monkeypatch.setattr(llm, "_override", fake)
+    logged = []
+    start = time.monotonic()
+    resp, failure = llm.invoke("coder", ["hi"], "1", on_log=lambda **kw: logged.append(kw["result"]))
+    stall.set()
+    assert failure is None and resp.tool_calls[0]["name"] == "task_complete"
+    assert logged == ["retry_after_rate_limit", "ok"] and time.monotonic() - start < 10
+
+
+def test_a_model_that_always_stalls_fails_cleanly_instead_of_hanging(monkeypatch):
+    import threading
+    stall = threading.Event()
+    monkeypatch.setattr(config, "LLM_HARD_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(config, "LLM_MAX_ATTEMPTS", 2)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    monkeypatch.setattr(llm, "_override", FakeChatModel(script=[lambda: stall.wait(30), lambda: stall.wait(30)], calls=[]))
+    resp, failure = llm.invoke("coder", ["hi"], "1")
+    stall.set()
+    assert resp is None and failure.startswith("LLM_UNAVAILABLE") and "timed out" in failure
+
+
+def test_the_planner_call_has_the_same_deadline(tmp_path, monkeypatch):
+    import threading
+    monkeypatch.setenv("PLANNER_MODEL_NAME", "m")
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy")
+    monkeypatch.setattr(config, "LLM_HARD_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    from agents.planner import PlannerAgent
+    stall, p = threading.Event(), PlannerAgent()
+    calls = []
+
+    def call_llm(prompt):
+        calls.append(1)
+        if len(calls) == 1:
+            stall.wait(30)
+        return '{"ok": true}'
+    p.call_llm = call_llm
+    assert p._call_with_retry("x") == '{"ok": true}' and len(calls) == 2 and p.requests == 2
+    stall.set()
+
+
 def test_planner_reports_quota_exhaustion_immediately(tmp_path, monkeypatch):
     monkeypatch.setenv("PLANNER_MODEL_NAME", "m")
     monkeypatch.setenv("GOOGLE_API_KEY", "dummy")

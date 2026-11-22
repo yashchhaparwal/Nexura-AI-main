@@ -53,6 +53,7 @@ copy .env.example .env            # then edit .env (never commit it)
 | `NEXURA_FAILURE_POLICY` | `stop` (default) or `continue` |
 | `NEXURA_SHELL_HINT` | Text telling the model which shell/OS it is on |
 | `NEXURA_LLM_MAX_ATTEMPTS` | Tries per model call on rate limits / 503 "high demand" (default 6, backoff up to 60 s) |
+| `NEXURA_LLM_HARD_TIMEOUT_S` | Hard wall-clock limit for one model call (default `2 x NEXURA_LLM_TIMEOUT_S + 30` = 270 s). A call that stalls longer is abandoned and retried like any timeout, so a dead connection cannot hang a run |
 | `NEXURA_RETRIEVAL_MODE` | `v1` (default) or `v2`: retrieval context and a planner that knows the project (needs the index; falls back to v1). v2 also asks the planner for behaviour checks (not only syntax) and render-checks changed Streamlit pages |
 | `NEXURA_INDEXING_ENABLED` | `false` (default) or `true`: build/use the local code index |
 | `NEXURA_PATCH_MODE` | `v1` (default) or `v2`: `apply_patch` with unique-match, atomic multi-hunk edits |

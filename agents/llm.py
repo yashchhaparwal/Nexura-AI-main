@@ -1,6 +1,7 @@
 """LLM access shared by the coder and debugger: lazy construction (no import-time side effects) and rate-limit backoff."""
 import random
 import re
+import threading
 import time
 from typing import Any
 
@@ -79,13 +80,36 @@ def backoff_delay(attempt: int, error_text: str) -> float:
     return min(base, 120) + random.uniform(0, base * 0.25)
 
 
+def call_with_deadline(fn, seconds: float | None = None):
+    """Run fn() and return its result, or raise TimeoutError after `seconds` of wall-clock time. The client libraries'
+    own timeouts do not always stop a stalled connection, so a call could block a run forever. The worker is a daemon
+    thread: if it never returns it is abandoned (it cannot be killed) and does not block process exit."""
+    seconds = config.LLM_HARD_TIMEOUT_S if seconds is None else seconds
+    box: dict[str, Any] = {}
+
+    def work():
+        try:
+            box["value"] = fn()
+        except BaseException as e:   # re-raised in the caller's thread
+            box["error"] = e
+
+    t = threading.Thread(target=work, name="llm-call", daemon=True)
+    t.start()
+    t.join(seconds)
+    if t.is_alive():
+        raise TimeoutError(f"Request timed out: no answer from the model after {seconds:.0f}s (call abandoned)")
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
 def invoke(role: str, messages: list, prompt_version: str, on_log=None) -> tuple[AIMessage | None, str | None]:
     """Call the model. Returns (response, None) or (None, failure_reason). Rate limits retry with backoff."""
     model = model_for(role)
     detail = ""
     for attempt in range(config.LLM_MAX_ATTEMPTS):
         try:
-            response = llm_with_tools(role).invoke(messages)
+            response = call_with_deadline(lambda: llm_with_tools(role).invoke(messages))
             if on_log:
                 calls = [c["name"] for c in (getattr(response, "tool_calls", None) or [])]
                 usage = getattr(response, "usage_metadata", None) or {}

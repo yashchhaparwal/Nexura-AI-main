@@ -10,7 +10,7 @@ from google import genai
 from google.genai import types
 
 import config
-from agents.llm import TRANSIENT, backoff_delay, quota_message
+from agents.llm import TRANSIENT, backoff_delay, call_with_deadline, quota_message
 from core.schemas import Acceptance, ExecutionPlan, Step  # noqa: F401  (re-exported for callers)
 from core.task_manager import validate_plan
 
@@ -211,8 +211,8 @@ class PlannerAgent:
         if not self.client:
             raise ValueError("GenAI Client is not initialized.")
         self.requests += 1
-        response = self.client.models.generate_content(
-            model=self.model_name, contents=prompt, config=types.GenerateContentConfig(temperature=config.TEMPERATURE))
+        response = call_with_deadline(lambda: self.client.models.generate_content(
+            model=self.model_name, contents=prompt, config=types.GenerateContentConfig(temperature=config.TEMPERATURE)))
         self._note_tokens(response)
         return (response.text or "").strip()
 
@@ -221,7 +221,7 @@ class PlannerAgent:
         for attempt in range(config.LLM_MAX_ATTEMPTS):
             self.requests += 1
             try:
-                return self.call_llm(prompt)
+                return call_with_deadline(lambda: self.call_llm(prompt))   # a stalled connection raises a retryable timeout
             except Exception as e:
                 text = str(e)
                 quota = quota_message(text)
