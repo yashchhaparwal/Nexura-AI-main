@@ -1,0 +1,170 @@
+{
+  "date": "2026-11-23T00:51:09",
+  "commit": "ac9bc63",
+  "fake_llm": false,
+  "oracle": false,
+  "tasks_file": "tasks.yaml",
+  "retrieval_mode": "v1",
+  "patch_mode": "v1",
+  "temperature": 0.2,
+  "coder_model": "gemini-3.1-flash-lite-preview",
+  "planner_model": "gemini-3.1-flash-lite-preview",
+  "approval_level": "auto_within_limits",
+  "prompt_versions": {
+    "planner": "6",
+    "coder": "2",
+    "debugger": "1"
+  },
+  "summary": {
+    "tasks": 2,
+    "runs": 2,
+    "repeat": 1,
+    "passed": 2,
+    "pass_rate": 1.0,
+    "skipped": [],
+    "retries": 4,
+    "tool_calls": 25,
+    "approvals": 1,
+    "time_s": 184.8,
+    "tokens": 67895,
+    "tokens_per_run": {
+      "mean": 33947.5,
+      "min": 31302,
+      "max": 36593
+    },
+    "regressions": 0,
+    "retrieval_fallbacks": 0,
+    "index_s": null
+  },
+  "per_task": {
+    "csv_report": {
+      "runs": 1,
+      "passed": 1,
+      "pass_rate": 1.0,
+      "retries": {
+        "mean": 4,
+        "min": 4,
+        "max": 4
+      },
+      "tool_calls": {
+        "mean": 12,
+        "min": 12,
+        "max": 12
+      },
+      "tokens": {
+        "mean": 31302,
+        "min": 31302,
+        "max": 31302
+      },
+      "time_s": {
+        "mean": 88.9,
+        "min": 88.9,
+        "max": 88.9
+      },
+      "regressions": null
+    },
+    "tests_for_existing": {
+      "runs": 1,
+      "passed": 1,
+      "pass_rate": 1.0,
+      "retries": {
+        "mean": 0,
+        "min": 0,
+        "max": 0
+      },
+      "tool_calls": {
+        "mean": 13,
+        "min": 13,
+        "max": 13
+      },
+      "tokens": {
+        "mean": 36593,
+        "min": 36593,
+        "max": 36593
+      },
+      "time_s": {
+        "mean": 95.9,
+        "min": 95.9,
+        "max": 95.9
+      },
+      "regressions": null
+    }
+  },
+  "results": [
+    {
+      "id": "csv_report",
+      "title": "CSV report script",
+      "repeat": 1,
+      "passed": true,
+      "run_status": "completed_with_failures",
+      "tasks_total": 3,
+      "tasks_done": 2,
+      "retries": 4,
+      "error_types": {
+        "unknown": 4
+      },
+      "tool_calls": 12,
+      "llm_calls": 13,
+      "approvals": 0,
+      "tokens": 31302,
+      "retrieval_fallbacks": 0,
+      "retrievals": 0,
+      "planner_context": false,
+      "task_errors": {
+        "3": "VERIFICATION_FAILED: - output_contains: `python report.py` expected output containing 'North'; exit=0; got: north: 150.0\nsouth: 250.0"
+      },
+      "run_error": null,
+      "checks": [
+        {
+          "type": "output_contains",
+          "ok": true,
+          "detail": "`python report.py` output contains text"
+        },
+        {
+          "type": "output_contains",
+          "ok": true,
+          "detail": "`python report.py` output contains text"
+        }
+      ],
+      "time_s": 88.9
+    },
+    {
+      "id": "tests_for_existing",
+      "title": "Write tests for existing code",
+      "repeat": 1,
+      "passed": true,
+      "run_status": "completed",
+      "tasks_total": 3,
+      "tasks_done": 3,
+      "retries": 0,
+      "error_types": {},
+      "tool_calls": 13,
+      "llm_calls": 15,
+      "approvals": 1,
+      "tokens": 36593,
+      "retrieval_fallbacks": 0,
+      "retrievals": 0,
+      "planner_context": false,
+      "task_errors": {},
+      "run_error": null,
+      "checks": [
+        {
+          "type": "file_exists",
+          "ok": true,
+          "detail": "test_shapes.py: exists"
+        },
+        {
+          "type": "command_ok",
+          "ok": true,
+          "detail": "`python -m pytest -q` exited 0"
+        },
+        {
+          "type": "output_contains",
+          "ok": true,
+          "detail": "`python -c \"print(open('shapes.py').read().count('def '))\"` output contains text"
+        }
+      ],
+      "time_s": 95.9
+    }
+  ]
+}
