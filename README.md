@@ -10,7 +10,7 @@ your real folder safely: every task is checkpointed in git, risky changes wait f
 **V2 (optional, off by default)** adds code intelligence for existing projects: a local code index with hybrid retrieval,
 project profile and summary, multi-hunk patches, per-file diff review, and a before/after test run that catches regressions.
 Everything V2 sits behind flags whose defaults keep V1 behaviour. Code graphs and GitHub/CI/deploy features are not here; see
-[docs/NEXURA_ROADMAP.md](docs/NEXURA_ROADMAP.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## How a run works
 
