@@ -1,4 +1,7 @@
 """Plan validation, next-task selection and run summaries (pure functions over plain dicts)."""
+import re
+from urllib.parse import urlparse
+
 import config
 
 
@@ -59,6 +62,27 @@ def validate_plan(plan, extra_commands=(), path_exists=None) -> list[str]:
         if path_exists is not None:
             errs += _bad_paths(s, path_exists)
     return errs
+
+
+_ROUTE = re.compile(r"(?<![\w.:/])/[A-Za-z_][\w\-/]*")      # '/health', '/users' (not 'and/or', 'HTML/CSS', 'src/app.py')
+_ROOT_ROUTE_ASKED = re.compile(r"\b(?:GET|POST)\s+/(?![\w])|\broot\s+(?:route|path|url|endpoint|page)|\bhome\s?page\b|\bindex\s+page\b|\blanding\s+page\b", re.I)
+
+
+def root_url_warnings(plan: dict, user_prompt: str) -> list[str]:
+    """An http_status check on the bare root URL for a request that only describes other routes (e.g. GET /health, GET /users).
+    Such a check returns 404 for an app that follows the request, and the agents cannot change a check: a live run spent 4 retries
+    on it. A warning only (the user sees it when approving the plan and can ask for a different URL), never a rejection."""
+    named = sorted(set(_ROUTE.findall(user_prompt or "")))
+    if not named or _ROOT_ROUTE_ASKED.search(user_prompt or ""):
+        return []
+    out = []
+    for step in plan.get("steps") or []:
+        for acc in step.get("acceptance") or []:
+            if acc.get("type") == "http_status" and acc.get("url") and urlparse(acc["url"]).path in ("", "/"):
+                out.append(f"step {step.get('step_id')}: the check requests the root URL {acc['url']} but your request only describes "
+                           f"{', '.join(named[:4])}. If the app has no '/' route this check gets a 404 and the agent cannot change it: "
+                           f"give feedback to check one of those URLs instead.")
+    return out
 
 
 def pick_next(tasks: list[dict], status: dict[str, str], policy: str | None = None) -> tuple[int | None, dict[str, str]]:

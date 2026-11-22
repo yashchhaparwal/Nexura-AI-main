@@ -5,6 +5,9 @@ RULES = [
     ("missing_dependency", r"ModuleNotFoundError|No module named|Cannot find module|npm ERR! missing|command not found|is not recognized"),
     ("import_error", r"ImportError|cannot import name"),
     ("syntax_error", r"SyntaxError|IndentationError|TabError|Unexpected token|invalid syntax"),
+    # an http_status check that got a response, just not the expected one: checked BEFORE port_in_use because its failure text
+    # also carries the server log, which may contain a bind error from a second server on the same port
+    ("http_status_mismatch", r"expected \d+, got status \d+"),
     ("port_in_use", r"Address already in use|EADDRINUSE|Errno 98|WinError 10048|port is already allocated"),
     ("test_failure", r"AssertionError|FAILED|\d+ failed|Tests? failed|assert "),
 ]
@@ -13,6 +16,7 @@ HINTS = {
                           "If it is a LOCAL package, run tests with `python -m pytest` (it puts the project root on sys.path; bare `pytest` does not).",
     "import_error": "An import failed: check the module/file names and the import path.",
     "syntax_error": "There is a syntax error: re-read the file and fix the exact line reported.",
+    "http_status_mismatch": "A check requests a URL and the app answered with the wrong status (404 = that route does not exist). The check, its URL and its port are fixed by the plan: change the CODE so that exact URL answers as expected (for example add the missing route). Do not change the port; a bind error in the server log is a side effect.",
     "port_in_use": "The port is busy: use a different port or stop the process using it.",
     "test_failure": "A test failed: read the assertion, compare expected vs actual, fix the code under test.",
     "unknown": "Read the error output carefully and fix the root cause.",

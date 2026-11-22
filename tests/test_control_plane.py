@@ -65,7 +65,8 @@ def test_validator_debug_mode_restrictions(ctx, workspace):
     (workspace / "a.py").write_text("x")
     ctx.files_read.add(ctx.key(workspace / "a.py"))
     assert validator.validate(A("create_file", path="n.py", content="1"), ctx, "debug").code == "NOT_ALLOWED_IN_DEBUG"
-    assert validator.validate(A("install_dependency", command="pip install x"), ctx, "debug").code == "NOT_ALLOWED_IN_DEBUG"
+    assert validator.validate(A("install_dependency", command="pip install x"), ctx, "debug").ok   # a missing package can only be fixed by installing it (approval still required)
+    assert validator.validate(A("run_command", command="pip install x"), ctx, "debug").code == "USE_INSTALL_DEPENDENCY"
     assert validator.validate(A("task_complete", metadata={"summary": "x"}), ctx, "debug").code == "NOT_ALLOWED_IN_DEBUG"
     assert validator.validate(A("write_file", path="missing.py", content="1"), ctx, "debug").code in ("FILE_NOT_FOUND", "DEBUG_NEW_FILE")
     assert validator.validate(A("patch_file", path="a.py", search_text="x", replace_text="y"), ctx, "debug").ok

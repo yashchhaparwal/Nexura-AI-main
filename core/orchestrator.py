@@ -23,7 +23,7 @@ from core.planner_context import build_planner_context
 from core.safety import SafetyError, redact_secrets, resolve_in_root
 from core.schemas import Action
 from core.state import NexuraState
-from core.task_manager import final_run_status, load_tasks, pick_next, render_plan_md
+from core.task_manager import final_run_status, load_tasks, pick_next, render_plan_md, root_url_warnings
 
 
 # ─── HELPERS ────────────────────────────────────────────────
@@ -179,6 +179,7 @@ def planner_node(state: NexuraState, config: RunnableConfig) -> dict:
 
     plan_dict = plan.model_dump()
     plan_dict["warnings"] = list(getattr(planner, "last_warnings", []) or [])   # e.g. acceptance checks that had to be dropped
+    plan_dict["warnings"] += root_url_warnings(plan_dict, state["user_prompt"])   # a check on "/" for an app described by other routes
     tasks = plan_dict.get("steps", [])
     print(f"[Planner] Generated {len(tasks)} tasks for project: {plan_dict.get('project_id', 'unknown')}")
     _print_plan(plan_dict, tasks)

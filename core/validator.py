@@ -24,7 +24,10 @@ REQUIRED = {
     "web_search": ["m:query"], "task_complete": [],
 }
 # What the Debugger may do (fix the failure; no new files, no plan edits, no installs)
-DEBUG_ALLOWED = {"read_file", "patch_file", "apply_patch", "write_file", "run_command", "list_directory", "verify_code_syntax"}
+# install_dependency: a failure caused by a missing package can only be fixed by installing it (run_command refuses installs).
+# It is still validated like any install and always needs the user's approval (config.APPROVE_INSTALLS).
+DEBUG_ALLOWED = {"read_file", "patch_file", "apply_patch", "write_file", "run_command", "list_directory", "verify_code_syntax",
+                 "install_dependency"}
 PLAN_FILES = {"plan.json", "plan.md"}
 
 
