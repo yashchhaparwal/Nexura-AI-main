@@ -241,6 +241,16 @@ class StateManager:
         self._exec("INSERT INTO events (run_id, task_id, ts, type, data) VALUES (?,?,?,?,?)",
                    (e.run_id, e.task_id, e.ts, e.type, json.dumps(e.data, default=str)))
 
+    def usage_since(self, since: float) -> tuple[int, int]:
+        """(model requests, tokens) of all runs since a timestamp. An llm_call event is one request unless it says `requests`
+        (the planner logs its calls in one event)."""
+        requests = tokens = 0
+        for r in self._all("SELECT data FROM events WHERE type='llm_call' AND ts>=?", (since,)):
+            d = json.loads(r["data"] or "{}")
+            requests += int(d.get("requests") or 1)
+            tokens += int(d.get("tokens") or 0)
+        return requests, tokens
+
     def list_events(self, run_id: str, after_id: int = 0) -> list[dict]:
         out = []
         for r in self._all("SELECT * FROM events WHERE run_id=? AND id>? ORDER BY id", (run_id, after_id)):

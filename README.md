@@ -57,6 +57,7 @@ copy .env.example .env            # then edit .env (never commit it)
 | `NEXURA_INDEXING_ENABLED` | `false` (default) or `true`: build/use the local code index |
 | `NEXURA_PATCH_MODE` | `v1` (default) or `v2`: `apply_patch` with unique-match, atomic multi-hunk edits |
 | `NEXURA_ALLOW_MODEL_DOWNLOAD` | `1` = you consent to the one-time download of the local embedding model |
+| `NEXURA_BUDGET_MAX_REQUESTS`, `NEXURA_BUDGET_MAX_TOKENS`, `NEXURA_BUDGET_WINDOW_HOURS` | Optional usage cap over a rolling window (default 24 h) across all runs, to protect a free-tier quota. The plan shows an estimated cost before you approve it; when a cap is reached the run pauses and `--resume <run_id>` continues it. Unset or 0 = no cap |
 
 ## Use it
 

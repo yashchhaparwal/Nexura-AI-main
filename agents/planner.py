@@ -180,6 +180,15 @@ class PlannerAgent:
 
         self.client = (genai.Client(api_key=self.api_key, http_options=types.HttpOptions(timeout=config.LLM_TIMEOUT_S * 1000, api_version="v1beta"))  # v1 rejects preview models
                        if self.api_key else None)
+        self.requests = 0   # model requests made by this planner (every attempt counts against the quota)
+        self.tokens = 0     # tokens the API reported
+
+    def _note_tokens(self, response) -> None:
+        try:
+            total = response.usage_metadata.total_token_count
+            self.tokens += total if isinstance(total, int) else 0
+        except AttributeError:
+            pass
 
     def call_llm(self, prompt: str) -> str:
         """Call Gemini with a JSON response schema so the output is structured."""
@@ -194,19 +203,23 @@ class PlannerAgent:
                 response_schema=ExecutionPlan,
             )
         )
+        self._note_tokens(response)
         return response.text.strip()
 
     def call_text(self, prompt: str) -> str:
         """Plain-text completion with the planner's model (used for the repo summary)."""
         if not self.client:
             raise ValueError("GenAI Client is not initialized.")
+        self.requests += 1
         response = self.client.models.generate_content(
             model=self.model_name, contents=prompt, config=types.GenerateContentConfig(temperature=config.TEMPERATURE))
+        self._note_tokens(response)
         return (response.text or "").strip()
 
     def _call_with_retry(self, prompt: str) -> str:
         """Transient API errors (rate limit, 5xx 'high demand', timeouts) are retried with backoff; others fail at once."""
         for attempt in range(config.LLM_MAX_ATTEMPTS):
+            self.requests += 1
             try:
                 return self.call_llm(prompt)
             except Exception as e:

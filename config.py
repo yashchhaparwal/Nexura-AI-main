@@ -36,6 +36,20 @@ def env_int(name: str, default: int, env=None) -> int:
     return value
 
 
+def env_limit(name: str, env=None) -> int:
+    """Read an optional cap: unset or 0 = no cap, otherwise a whole number of 1 or more."""
+    raw = (os.environ if env is None else env).get(name)
+    if raw is None or raw.strip() == "":
+        return 0
+    try:
+        value = int(raw)
+    except ValueError:
+        value = -1
+    if value < 0:
+        raise ConfigError(f"{name}={raw!r} is not valid. Use a whole number (0 or unset = no cap).")
+    return value
+
+
 def env_bool(name: str, default: bool, env=None) -> bool:
     raw = (os.environ if env is None else env).get(name)
     if raw is None:
@@ -61,6 +75,11 @@ COMMAND_TIMEOUT_S = 60
 INSTALL_TIMEOUT_S = 180
 TEMPERATURE = 0.2
 LLM_TIMEOUT_S = int(os.getenv("NEXURA_LLM_TIMEOUT_S", "120"))   # per model request; a stalled connection must not hang a run
+
+# --- Usage budget (free-tier quotas): counts model requests/tokens over a rolling window across ALL runs. Off by default. ---
+BUDGET_MAX_REQUESTS = env_limit("NEXURA_BUDGET_MAX_REQUESTS")   # e.g. 450 for a 500-requests/day key (leave a margin); 0 = no cap
+BUDGET_MAX_TOKENS = env_limit("NEXURA_BUDGET_MAX_TOKENS")       # 0 = no cap
+BUDGET_WINDOW_HOURS = env_int("NEXURA_BUDGET_WINDOW_HOURS", 24)
 
 # --- Safety ------------------------------------------------
 ALLOWED_COMMANDS = ["python", "python3", "py", "pip", "pip3", "node", "npm", "npx", "uvicorn", "pytest", "streamlit", "flask"]

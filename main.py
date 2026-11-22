@@ -176,9 +176,10 @@ def main():
 
     try:
         values = run_graph(graph, initial_state, config)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError) as e:   # EOFError: stdin closed (piped/non-interactive) at a prompt that needs an answer
         sm.update_run(project.run_id, "cancelled")
-        print(f"\nCancelled. Resume with: python main.py --resume {project.run_id}")
+        why = "Input closed while waiting for your answer (run it in a terminal, or use the VS Code extension). " if isinstance(e, EOFError) else ""
+        print(f"\nCancelled. {why}Resume with: python main.py --resume {project.run_id}")
         sys.exit(130)
     finally:
         project.processes.stop_all()

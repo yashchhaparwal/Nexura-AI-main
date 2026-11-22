@@ -17,7 +17,7 @@ from langchain_core.runnables import RunnableConfig
 import config as app_config
 from agents import coder, debugger
 from core import execution_manager as em
-from core import approvals, checkpoints, retry_manager, validator, verification
+from core import approvals, budget, checkpoints, retry_manager, validator, verification
 from core.context_builder import build_task_context
 from core.planner_context import build_planner_context
 from core.safety import SafetyError, redact_secrets, resolve_in_root
@@ -73,6 +73,14 @@ def _llm_logger(ctx, task_id):
     return log
 
 
+def _log_planner_usage(ctx, planner) -> None:
+    """The planner's model requests and tokens count against the quota too: record them like the coder's calls."""
+    requests = getattr(planner, "requests", 0)
+    if ctx.state_manager is not None and isinstance(requests, int) and requests > 0:
+        ctx.state_manager.add_event(ctx.run_id, "llm_call", None, role="planner", result="ok",
+                                    tokens=getattr(planner, "tokens", 0) or None, requests=requests)
+
+
 def _ensure_baseline(ctx) -> None:
     """V2-5.3: once per run (after plan approval, before the first task), run the approved test command and store the results."""
     if ctx.baseline_command is None or ctx.baseline is not None:
@@ -122,21 +130,29 @@ def planner_node(state: NexuraState, config: RunnableConfig) -> dict:
     previous_plan = state.get("plan")
     print("\n--- [1] Re-running Planner with feedback ---" if feedback and previous_plan else "\n--- [1] Running Planner ---")
 
+    planner = None
     try:
+        if ctx.state_manager is not None and (why := budget.check(ctx.state_manager)):
+            raise PlanError(f"BUDGET_REACHED: {why}")
         planner = PlannerAgent()
         pctx = build_planner_context(ctx, state["user_prompt"], planner.call_text)   # None unless RETRIEVAL_MODE=v2 on an existing project
         plan = planner.plan(user_prompt=state["user_prompt"], project_path=str(plan_dir),
                                    feedback=feedback, previous_plan=previous_plan, context=pctx)
     except PlanError as e:
         print(f"[Planner] FAILED: {e}")
+        _log_planner_usage(ctx, planner)
         _finish_run(ctx, "failed", f"Planner failed: {e}")
         return {"run_status": "failed", "run_error": f"Planner failed: {e}"}
+    _log_planner_usage(ctx, planner)
 
     plan_dict = plan.model_dump()
     plan_dict["warnings"] = list(getattr(planner, "last_warnings", []) or [])   # e.g. acceptance checks that had to be dropped
     tasks = plan_dict.get("steps", [])
     print(f"[Planner] Generated {len(tasks)} tasks for project: {plan_dict.get('project_id', 'unknown')}")
     _print_plan(plan_dict, tasks)
+    est = budget.estimate(len(tasks))
+    print(f"[Budget] {budget.estimate_text(len(tasks), ctx.state_manager)}")
+    ctx.emit("budget_estimate", **est)
     if ctx.state_manager is not None:
         ctx.state_manager.save_plan(ctx.run_id, plan_dict, load_tasks(plan_dict), feedback=feedback)
     return {
@@ -234,6 +250,11 @@ def task_picker_node(state: NexuraState, config: RunnableConfig) -> dict:
 
 
 def _agent_turn(state: NexuraState, propose, role_label: str, config: RunnableConfig) -> dict:
+    ctx = _ctx(config)
+    if ctx.state_manager is not None and (why := budget.check(ctx.state_manager)):   # free-tier quota: stop cleanly, resume later
+        ctx.emit("budget_reached", _cur(state)["step_id"], reason=why)
+        print(f"  [Budget] {why}")
+        return _fail(f"BUDGET_REACHED: {why}")
     task_msgs = state["messages"]
     response, failure = propose(task_msgs, on_log=_llm_logger(_ctx(config), _cur(state)["step_id"]))
     if failure:
@@ -542,7 +563,8 @@ def advance_task_node(state: NexuraState, config: RunnableConfig) -> dict:
         print(f"[Orchestrator] Task {task['step_id']} FAILED: {errors[sid]}")
 
     before = dict(status)
-    nxt, status = pick_next(state["tasks"], status)
+    out_of_budget = outcome != "done" and errors.get(sid, "").startswith("BUDGET_REACHED")
+    nxt, status = pick_next(state["tasks"], status, "stop" if out_of_budget else None)   # no point starting the next task
     if ctx.state_manager is not None:
         ctx.state_manager.mark_task(ctx.run_id, task["step_id"], status[sid], attempts=state.get("attempts", 0),
                                     reason=errors.get(sid))
@@ -559,6 +581,8 @@ def advance_task_node(state: NexuraState, config: RunnableConfig) -> dict:
     if nxt is None:
         update["run_status"] = final_run_status(status)
         update["run_status"], note = _regression_check(ctx, update["run_status"])
+        if out_of_budget:
+            note = f"{errors[sid]} Paused: continue with `python main.py --resume {ctx.run_id}` once the budget allows."
         if note:
             update["run_error"] = note
         _finish_run(ctx, update["run_status"], note)
