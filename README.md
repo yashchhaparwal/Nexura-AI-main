@@ -73,6 +73,7 @@ python main.py --resume <run_id>                                            # co
 python main.py --undo <run_id> [--task N] [--confirm]                       # restore files from the checkpoints
 python main.py --metrics <run_id>                                           # success rate, retries, error types, time
 python main.py --project shop --prompt "..." --baseline                     # run the project's tests before/after; report new failures
+python main.py --project shop --prompt "..." --commit                       # if every task is verified, commit the changes on a new branch nexura/<run_id> (never pushes)
 ```
 
 Exit code is 0 only if every task was verified. Run folders (`plan.md` with live checkboxes, `plan.json`, `log.jsonl`) live in
@@ -112,6 +113,7 @@ Summary below; full threat model in [docs/SECURITY.md](docs/SECURITY.md).
 - **Files:** read-before-write, size and binary limits, `.env*` and `.git/` never writable, lockfiles/keys/CI workflows need approval,
   files with unsaved editor changes are never touched, ignored and secret files never reach the model, credentials in output are redacted.
 - **Git:** per-task checkpoints (temporary index; HEAD, branches and your staging area are never touched), exact undo, one active run per workspace.
+  The only exception is `--commit` (API: `commit: true`), which you must ask for: after a fully verified run it creates one new branch `nexura/<run_id>` and commits only the files the run changed (your other staged or unstaged work is not included). It never pushes, refuses if one of those files already had your own uncommitted edits, and leaves everything as it was if the commit fails (for example a pre-commit hook). `git switch <previous branch>` goes back; the working folder then shows the files without Nexura's changes, because they live on the new branch.
 - **Honesty:** a task is done only when its acceptance checks pass; failed work is reported as failed.
 
 ## Develop

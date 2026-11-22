@@ -1,7 +1,8 @@
 """Git-based checkpoints and undo. Uses the git CLI only (no GitPython).
 
 Checkpoints are commit objects stored under refs/nexura/<run_id>/<task_id>, built from a TEMPORARY index, so HEAD, branches
-and the user's index/staging area are never touched. Untracked files are included; .gitignore is respected."""
+and the user's index/staging area are never touched. Untracked files are included; .gitignore is respected.
+The single exception is commit_run (V3-2), which the user must ask for: it creates one new branch for a finished run."""
 import hashlib
 import os
 import subprocess
@@ -85,6 +86,78 @@ def snapshot(root: Path | str, run_id: str, task_id: int | str, message: str = "
         commit = _git(root, "commit-tree", tree, *parent, "-m", message or f"nexura checkpoint {run_id}/{task_id}").stdout.strip()
     _git(root, "update-ref", ref_name(run_id, task_id), commit)
     return commit
+
+
+# ─── commit a finished run (opt-in) ─────────────────────────
+
+@dataclass
+class CommitResult:
+    committed: bool
+    branch: str | None = None
+    commit: str | None = None
+    previous: str | None = None            # branch (or short commit) the user was on: `git switch <previous>` goes back
+    files: list[str] = field(default_factory=list)
+    reason: str | None = None              # why nothing was committed
+
+
+def _current_ref(root) -> str:
+    r = _git(root, "symbolic-ref", "--short", "-q", "HEAD", check=False)
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else _git(root, "rev-parse", "--short", "HEAD").stdout.strip()
+
+
+def dirty_before_run(root: Path | str, run_id: str) -> set[str]:
+    """Files that had uncommitted changes of the USER when the run started (the 'base' checkpoint holds them)."""
+    if not has_checkpoint(root, run_id, "base"):
+        return set()
+    base = ref_name(run_id, "base")
+    r = _git(root, "diff", "--name-only", "-z", f"{base}^", base, check=False, text=False)
+    return {p.decode("utf-8", "replace") for p in r.stdout.split(b"\0") if p} if r.returncode == 0 else set()
+
+
+def commit_run(root: Path | str, run_id: str, files: list[str], message: str, branch: str | None = None) -> CommitResult:
+    """Opt-in: put a finished run's changes on a NEW branch (nexura/<run_id>) as one commit. This is the one place Nexura moves
+    HEAD, and only when the user asked for it. Only `files` (what the run changed) are committed (`git commit --only`): the
+    user's other staged or unstaged work is not included and stays as it is. Never pushes. Refuses if one of the files already
+    had uncommitted changes of the user's before the run (the commit would mix the two). Failure leaves everything as it was."""
+    root = Path(root)
+    branch = branch or f"nexura/{run_id}"
+    if not is_repo(root):
+        return CommitResult(False, reason="not a git repository")
+    unique = list(dict.fromkeys(f.replace("\\", "/") for f in files))
+    try:
+        for f in unique:
+            resolve_in_root(root, f)
+    except SafetyError as e:
+        return CommitResult(False, reason=str(e))
+    if not unique:
+        return CommitResult(False, reason="the run changed no files")
+    mixed = sorted(set(unique) & dirty_before_run(root, run_id))
+    if mixed:
+        return CommitResult(False, files=unique, reason="these files already had uncommitted changes of yours before the run, so a commit would "
+                                                         "mix your edits with Nexura's: " + ", ".join(mixed) + ". Commit them yourself.")
+    if not _git(root, "status", "--porcelain", "--untracked-files=all", "--", *unique).stdout.strip():
+        return CommitResult(False, files=unique, reason="the files are identical to the last commit (nothing to commit)")
+    if _git(root, "rev-parse", "-q", "--verify", f"refs/heads/{branch}", check=False).returncode == 0:
+        return CommitResult(False, files=unique, reason=f"branch {branch} already exists")
+    previous = _current_ref(root)
+    switched = False
+    try:
+        _git(root, "switch", "-q", "-c", branch)
+        switched = True
+        present = [f for f in unique if (root / f).exists()]
+        if present:
+            _git(root, "add", "--", *present)
+        gone = [f for f in unique if f not in present]
+        if gone:
+            _git(root, "rm", "--cached", "-q", "--ignore-unmatch", "--", *gone)
+        _git(root, "commit", "-q", "--only", "-m", message, "--", *unique)
+        sha = _git(root, "rev-parse", "--short", "HEAD").stdout.strip()
+    except GitError as e:   # e.g. a pre-commit hook rejected it: put everything back
+        if switched:
+            _git(root, "switch", "-q", previous, check=False)
+            _git(root, "branch", "-D", branch, check=False)
+        return CommitResult(False, files=unique, reason=e.message)
+    return CommitResult(True, branch=branch, commit=sha, previous=previous, files=unique)
 
 
 def has_checkpoint(root: Path | str, run_id: str, task_id: int | str) -> bool:

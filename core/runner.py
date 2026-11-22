@@ -66,7 +66,8 @@ def _prepare_git(root: Path, run_id: str, dirty_policy: str, git_init: bool) -> 
 def start_run(sm: StateManager, project_id: str, root: str | Path, prompt: str, interactive: bool = False,
               approval_level: str | None = None, *, require_git: bool = True, git_init: bool = False,
               dirty_policy: str = "checkpoint", dirty_files: list[str] | None = None,
-              trusted: bool = True, baseline_command: str | None = None) -> tuple[ProjectContext, dict]:
+              trusted: bool = True, baseline_command: str | None = None,
+              commit_on_success: bool = False) -> tuple[ProjectContext, dict]:
     """Raises GitError(NOT_A_REPO), DirtyWorkspace, or WorkspaceBusy. `require_git=False` exists for unit tests only.
     `baseline_command`: the test command the user approved running before and after the run (V2 regression check)."""
     root = Path(root)
@@ -83,12 +84,14 @@ def start_run(sm: StateManager, project_id: str, root: str | Path, prompt: str, 
         raise
     ctx = _context(sm, run_id, project_id, root, approval_level, trusted, dirty_files or [], require_git)
     ctx.baseline_command = baseline_command
+    ctx.commit_on_success = commit_on_success
     ctx.emit("run_started", prompt=prompt[:200])
     return ctx, initial_state(prompt, root, interactive)
 
 
 def prepare_resume(sm: StateManager, run_id: str, interactive: bool = False, *, require_git: bool = True,
-                   dirty_files: list[str] | None = None, trusted: bool = True) -> tuple[ProjectContext, dict]:
+                   dirty_files: list[str] | None = None, trusted: bool = True,
+                   commit_on_success: bool = False) -> tuple[ProjectContext, dict]:
     """Reload a run: keep `done` tasks, restart everything else with a fresh attempt count."""
     run = sm.get_run(run_id)
     if run is None:
@@ -115,6 +118,7 @@ def prepare_resume(sm: StateManager, run_id: str, interactive: bool = False, *, 
             sm.mark_task(run_id, s["step_id"], "pending", attempts=0, reason=None)
     sm.reopen_run(run_id)
     ctx = _context(sm, run_id, run.project_id, Path(root), run.approval_level, trusted, dirty_files or [], require_git)
+    ctx.commit_on_success = commit_on_success
     if ctx.baseline:   # a resumed run keeps its baseline and is still checked for regressions at the end
         ctx.baseline_command = ctx.baseline.get("command")
     ctx.emit("run_resumed", first_task=steps[first]["step_id"])

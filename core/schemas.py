@@ -37,6 +37,7 @@ class ProjectContext(BaseModel):
     git_checkpoints: bool = False  # take a git checkpoint before each task (set by the runner)
     extra_commands: list[str] = Field(default_factory=list)   # executables the user approved for THIS workspace (V2-5.2)
     baseline: Optional[dict] = Field(default=None, exclude=True)   # test results before the run (V2-5.3)
+    commit_on_success: bool = False          # V3-2: the user asked for the finished run to be committed on a new branch (never pushed)
     baseline_command: Optional[str] = None   # the test command the user approved running before/after the run (None = no baseline, '' = asked for but none found)
 
     # persistence (all optional so tools/tests work without them)

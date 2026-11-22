@@ -112,6 +112,38 @@ def _regression_check(ctx, status: str) -> tuple[str, str | None]:
     return status, None
 
 
+def _commit_if_requested(ctx, state: dict, status: str) -> None:
+    """V3-2 (opt-in): when the user asked for it and the run fully succeeded, commit the files it changed on a new branch.
+    Never pushes, never fails the run: a problem is reported as an event and a message."""
+    if not ctx.commit_on_success:
+        return
+    if status != "completed":
+        ctx.emit("git_commit_skipped", reason=f"the run ended as {status}; only a fully verified run is committed")
+        print(f"[Git] Not committed: the run ended as {status}.")
+        return
+    if not ctx.git_checkpoints or ctx.state_manager is None:
+        ctx.emit("git_commit_skipped", reason="git is not enabled for this run")
+        return
+    plan = state.get("plan") or {}
+    goal = " ".join(str(plan.get("goal") or state.get("user_prompt") or "").split())
+    steps = "\n".join(f"- {t['step_id']}. {t['title']}" for t in state.get("tasks") or [])
+    message = f"nexura: {goal[:60]}\n\nRun {ctx.run_id}. Steps, each verified by its acceptance checks:\n{steps}\n\nCommitted by Nexura on request; not pushed."
+    files = [c["file"] for c in ctx.state_manager.list_file_changes(ctx.run_id)]
+    try:
+        res = checkpoints.commit_run(ctx.root, ctx.run_id, files, message)
+    except checkpoints.GitError as e:
+        ctx.emit("git_commit_skipped", reason=e.message)
+        print(f"[Git] Not committed: {e.message}")
+        return
+    if res.committed:
+        ctx.emit("git_committed", branch=res.branch, commit=res.commit, previous=res.previous, files=len(res.files))
+        print(f"[Git] Committed {len(res.files)} file(s) as {res.commit} on new branch {res.branch} (not pushed). "
+              f"You are now on {res.branch}; `git switch {res.previous}` goes back (the working folder then shows the files without these changes).")
+    else:
+        ctx.emit("git_commit_skipped", reason=res.reason)
+        print(f"[Git] Not committed: {res.reason}")
+
+
 def _finish_run(ctx, status: str, error: str | None = None) -> None:
     if ctx.state_manager is not None:
         ctx.state_manager.update_run(ctx.run_id, status, error)
@@ -585,6 +617,7 @@ def advance_task_node(state: NexuraState, config: RunnableConfig) -> dict:
             note = f"{errors[sid]} Paused: continue with `python main.py --resume {ctx.run_id}` once the budget allows."
         if note:
             update["run_error"] = note
+        _commit_if_requested(ctx, state, update["run_status"])
         _finish_run(ctx, update["run_status"], note)
     _write_plan_md(ctx, {**state, **update})
     return update

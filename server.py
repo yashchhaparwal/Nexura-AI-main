@@ -47,6 +47,7 @@ class RunReq(BaseModel):
     git_init: bool = False
     baseline: bool = False       # the user approved running the project's test command before and after the run
     subproject: str = Field(default="", max_length=512)   # monorepo: the folder this run targets ("" = whole workspace)
+    commit: bool = False         # V3-2: if every task is verified, commit the changed files on a new branch nexura/<run_id> (never pushed)
 
 
 class ProfileReq(BaseModel):
@@ -310,7 +311,8 @@ def create_app(token: str | None = None, sm: StateManager | None = None, checkpo
             baseline_cmd = (prof.test_commands or [""])[0]    # "" = asked for, but nothing to run
         ctx, state = await asyncio.to_thread(start_errors, lambda: runner.start_run(
             sm, req.workspace_id, ws["path"], req.prompt, approval_level=req.approval_level, git_init=req.git_init,
-            dirty_policy=req.dirty_policy, dirty_files=req.dirty_files, trusted=ws["trusted"], baseline_command=baseline_cmd))
+            dirty_policy=req.dirty_policy, dirty_files=req.dirty_files, trusted=ws["trusted"], baseline_command=baseline_cmd,
+            commit_on_success=req.commit))
         if index["manager"] is not None:   # keep the index fresh while the run edits files
             ctx.indexer = index["manager"].existing(req.workspace_id)
         manager.start(ctx, state)

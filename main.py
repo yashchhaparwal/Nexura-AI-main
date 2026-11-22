@@ -116,6 +116,8 @@ def main():
     parser.add_argument("--confirm", action="store_true", help="With --undo: overwrite files you edited since the run")
     parser.add_argument("--baseline", action="store_true",
                         help="Run the project's own test command before and after the run and report new failures (regressions)")
+    parser.add_argument("--commit", action="store_true",
+                        help="When every task is verified, commit the changed files on a new branch nexura/<run_id> (never pushes)")
     parser.add_argument("--metrics", metavar="RUN_ID", help="Print metrics for a run and exit")
 
     args = parser.parse_args()
@@ -140,12 +142,13 @@ def main():
 
     try:
         if args.resume:
-            project, initial_state = prepare_resume(sm, args.resume, interactive=args.interactive)
+            project, initial_state = prepare_resume(sm, args.resume, interactive=args.interactive, commit_on_success=args.commit)
             thread_id = f"{project.run_id}-r{int(time.time())}"
         else:
             workspace_path = os.path.join(os.path.dirname(__file__), "workspace", args.project)
             project, initial_state = start_run(sm, args.project, workspace_path, args.prompt, interactive=args.interactive,
-                                               approval_level=args.approval, git_init=args.git_init, dirty_policy=args.dirty_policy)
+                                               approval_level=args.approval, git_init=args.git_init, dirty_policy=args.dirty_policy,
+                                               commit_on_success=args.commit)
             thread_id = project.run_id
     except (ResumeError, WorkspaceBusy, DirtyWorkspace) as e:
         print(f"Cannot start: {e}")

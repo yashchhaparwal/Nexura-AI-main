@@ -16,7 +16,7 @@ The workspace root is stored server-side when the workspace is registered and is
 |---|---|---|---|
 | GET | `/health` | | `{"ok": true, "active_runs": 0}` |
 | POST | `/workspaces` | `{"path": "/abs/dir", "trusted": true}` | `{"workspace_id": "<32 hex>"}` (id = hash of the real path) |
-| POST | `/runs` | `{"workspace_id", "prompt", "approval_level", "dirty_policy", "dirty_files": [], "git_init": false, "baseline": false, "subproject": ""}` | `{"run_id"}` |
+| POST | `/runs` | `{"workspace_id", "prompt", "approval_level", "dirty_policy", "dirty_files": [], "git_init": false, "baseline": false, "subproject": "", "commit": false}` | `{"run_id"}` |
 | GET | `/runs/{id}` | | run, tasks, `state`, `waiting` (current question), `summary`, `plan` |
 | GET | `/runs/{id}/events` | | Server-Sent Events; reconnect with `Last-Event-ID` |
 | POST | `/runs/{id}/plan` | `{"decision": "approve" \| "feedback", "text"?}` | `{"ok": true}` |
@@ -46,6 +46,8 @@ V2 endpoints (all need the token; all paths go through the workspace path checks
 | GET / POST | `/workspaces/{id}/commands` | POST `{"exe": "poetry"}` | the executables the user approved for this workspace; POST approves one name from `approvable` only (422 otherwise) |
 | DELETE | `/workspaces/{id}/commands/{exe}` | | revokes an approval |
 | GET / POST | `/workspaces/{id}/summary` | | cached project summary / (re)generate it with the planner's model (cached by a source hash; 503 `SUMMARY_UNAVAILABLE` without a model) |
+
+`commit: true` on `POST /runs` asks for the finished run to be committed on a new branch `nexura/<run_id>` (only if every task is verified and there is no regression; never pushed). The run stream carries `git_committed {branch, commit, previous, files}` or `git_commit_skipped {reason}`.
 
 `baseline: true` on `POST /runs` is the user's approval to run the project's test command (from the profile) once before the first
 task and once after the last; new failing tests make the run `completed_with_failures` (event `regression_detected`).
