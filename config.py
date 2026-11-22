@@ -112,7 +112,7 @@ except ValueError:
 APPROVAL_LEVEL = os.getenv("NEXURA_APPROVAL_LEVEL", "ask_risky")  # ask_every_edit | ask_risky | auto_within_limits
 
 # --- Prompts / environment hints ---------------------------
-PROMPT_VERSIONS = {"planner": "6", "coder": "2", "debugger": "3"}   # debugger 1-2: could not install a missing package
+PROMPT_VERSIONS = {"planner": "6", "coder": "2", "debugger": "5"}   # debugger 1-4: could not install a missing package / saw no files for a step that changed none
 SHELL_HINT = os.getenv("NEXURA_SHELL_HINT", "Windows PowerShell" if os.name == "nt" else "POSIX sh")
 
 
@@ -156,7 +156,7 @@ PATCH_MODE = env_choice("NEXURA_PATCH_MODE", "v1", ("v1", "v2"))
 if RETRIEVAL_MODE == "v2":
     PROMPT_VERSIONS.update(planner="7")   # + the CHECK QUALITY section
 if PATCH_MODE == "v2":
-    PROMPT_VERSIONS.update(coder="3", debugger="4")   # the coder/debugger prompts prefer apply_patch in v2
+    PROMPT_VERSIONS.update(coder="3", debugger="6")   # the coder/debugger prompts prefer apply_patch in v2
 EMBEDDING_MODEL = os.getenv("NEXURA_EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")   # local only; downloaded after consent
 CHUNK_MAX_TOKENS = env_int("NEXURA_CHUNK_MAX_TOKENS", 400)
 CHUNK_MAX_LINES = env_int("NEXURA_CHUNK_MAX_LINES", 80)

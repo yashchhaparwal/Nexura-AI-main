@@ -315,6 +315,11 @@ def debugger_node(state: NexuraState, config: RunnableConfig) -> dict:
     names = list(dict.fromkeys(state.get("changed_files", [])
                                + [a["path"] for a in task.get("acceptance", []) if a.get("path")]
                                + [p for a in task.get("acceptance", []) for p in (a.get("paths") or [])]))[:6]
+    earlier = False
+    if not names:   # e.g. a step that only starts a server: the code to fix was written by an earlier step (a live run showed a
+        # debugger that saw "(no files)" and spent all its attempts listing the directory, because an edit needs a prior read)
+        names = list(dict.fromkeys(fc["file"] for fc in reversed(state.get("file_changes") or [])))[:4]
+        earlier = bool(names)
     files = {}
     for n in names:
         try:
@@ -326,7 +331,7 @@ def debugger_node(state: NexuraState, config: RunnableConfig) -> dict:
     prompt = debugger.build_prompt(task, state.get("verify_failure") or "", state.get("error_type") or "unknown",
                                    (state.get("retry_hint") or "") + (
                                        "\nYour previous proposal was rejected: " + state["last_rejection"] if state.get("last_rejection") else ""),
-                                   files)
+                                   files, earlier_files=earlier)
     print(f"  [Debugger] attempt {state.get('attempts', 0)} for task {task['step_id']}")
     state = {**state, "messages": [HumanMessage(content=prompt)]}  # fresh, focused conversation
     out = _agent_turn(state, debugger.propose, "debugger", config)

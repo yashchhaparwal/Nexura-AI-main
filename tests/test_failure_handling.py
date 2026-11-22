@@ -9,6 +9,7 @@ from core.error_classifier import HINTS, classify
 from core.retry_manager import decide
 from core.schemas import Action, ProjectContext
 from core.task_manager import root_url_warnings
+from tests.test_persistence import env  # noqa: F401  (a fixture)
 
 
 @pytest.fixture
@@ -44,7 +45,7 @@ def test_debugger_prompt_agrees_with_what_it_may_do(monkeypatch):
                                  "missing_dependency", "hint", {})
     assert "install_dependency" in text and "do not install packages" not in text.lower() and "cannot change a check" in text
     assert "install_dependency" in HINTS["missing_dependency"]            # the hint and the prompt no longer contradict each other
-    assert config.PROMPT_VERSIONS["debugger"] in ("3", "4")
+    assert config.PROMPT_VERSIONS["debugger"] in ("5", "6")
 
 
 # ─── a wrong HTTP status is not a busy port ───
@@ -116,3 +117,84 @@ def test_the_warning_reaches_the_plan_the_user_approves(monkeypatch, tmp_path):
     cfg = {"configurable": {"project": ProjectContext(run_id="r", root=tmp_path)}}
     out = planner_node({"user_prompt": "FastAPI app with GET /health and GET /users on port 8765", "workspace_path": str(tmp_path)}, cfg)
     assert any("root URL" in w for w in out["plan"]["warnings"])
+
+
+# ─── a step that changed no files still lets the debugger see and edit the code ───
+
+def _debug_state(file_changes, changed_files=()):
+    from langchain_core.messages import HumanMessage
+    return {"tasks": [{"step_id": 4, "title": "Verify the server", "description": "start it", "acceptance": [
+                {"type": "http_status", "url": "http://127.0.0.1:8765/", "start_command": "python -m uvicorn app:app --port 8765"}]}],
+            "current_task_index": 0, "messages": [HumanMessage(content="x")], "changed_files": list(changed_files),
+            "file_changes": file_changes, "verify_failure": "- http_status: http://127.0.0.1:8765/ expected 200, got status 404",
+            "error_type": "http_status_mismatch", "retry_hint": "hint", "attempts": 1, "tool_calls_count": 0}
+
+
+def _run_debugger_node(monkeypatch, tmp_path, state):
+    from langchain_core.messages import AIMessage
+    from core import orchestrator
+    seen = {}
+
+    def propose(messages, on_log=None):
+        seen["prompt"] = str(messages[-1].content)
+        return AIMessage(content="", tool_calls=[{"name": "read_file", "args": {"target_file": "app.py"}, "id": "c"}]), None
+    monkeypatch.setattr(debugger, "propose", propose)
+    ctx = ProjectContext(run_id="r", root=tmp_path)
+    orchestrator.debugger_node(state, {"configurable": {"project": ctx}})
+    return seen["prompt"], ctx
+
+
+def test_debugger_sees_files_from_earlier_steps_when_its_step_changed_none(monkeypatch, tmp_path):
+    (tmp_path / "app.py").write_text("from fastapi import FastAPI\napp = FastAPI()\n")
+    (tmp_path / "requirements.txt").write_text("fastapi\n")
+    prompt, ctx = _run_debugger_node(monkeypatch, tmp_path, _debug_state([{"file": "app.py"}, {"file": "requirements.txt"}, {"file": "app.py"}]))
+    assert "--- app.py ---" in prompt and "app = FastAPI()" in prompt and "changed earlier in this run" in prompt
+    assert ctx.key(tmp_path / "app.py") in ctx.files_read            # shown = read, so an edit in this round is allowed
+
+
+def test_the_earlier_files_note_is_not_shown_when_the_step_changed_files_itself(monkeypatch, tmp_path):
+    (tmp_path / "app.py").write_text("OLD = 1\n")
+    (tmp_path / "other.py").write_text("OTHER = 1\n")
+    prompt, _ = _run_debugger_node(monkeypatch, tmp_path, _debug_state([{"file": "other.py"}], changed_files=["app.py"]))
+    assert "OLD = 1" in prompt and "OTHER = 1" not in prompt and "changed earlier in this run" not in prompt
+
+
+def test_no_files_anywhere_still_says_so(monkeypatch, tmp_path):
+    prompt, _ = _run_debugger_node(monkeypatch, tmp_path, _debug_state([]))
+    assert "(no files)" in prompt and "changed earlier in this run" not in prompt
+
+
+def test_the_debugger_prompt_no_longer_forbids_what_the_check_needs():
+    text = debugger.build_prompt({"step_id": 4, "title": "t", "description": "d"}, "f", "http_status_mismatch", "h", {"app.py": "x"})
+    assert "Add NO features." not in text and "IS the fix" in text and "ONE round" in text
+
+
+def test_pipeline_a_step_that_changes_nothing_is_fixed_by_the_debugger_in_one_round(env, monkeypatch):    # noqa: F811
+    """The 2026-11-23 trace: step 2 only checks the result of step 1. The debugger now sees app.py and patches it in its single round."""
+    from langchain_core.messages import AIMessage
+    from langgraph.types import Command
+    from core.runner import start_run
+    from core.state_manager import make_checkpointer
+    import tests.test_persistence as tp
+    from tests.conftest import tool_call_msg
+
+    plan = {"project_id": "p", "goal": "g", "steps": [
+        {"step_id": 1, "title": "write app", "description": "d", "dependencies": [], "acceptance": [{"type": "file_exists", "path": "app.py"}]},
+        {"step_id": 2, "title": "check app", "description": "d", "dependencies": [1],
+         "acceptance": [{"type": "command_ok", "command": 'python -c "import app; assert app.ROUTE"'}]}]}
+    monkeypatch.setattr(tp, "PLAN", plan)
+    env.llm.script[:] = [
+        AIMessage(content="", tool_calls=[{"name": "create_file", "args": {"target_file": "app.py", "content": "ROUTE = 0\n"}, "id": "a"},
+                                          {"name": "task_complete", "args": {"summary": "ok"}, "id": "b"}]),
+        tool_call_msg("task_complete", {"summary": "nothing to change"}, "c"),                       # step 2's coder changes no file
+        tool_call_msg("patch_file", {"target_file": "app.py", "search_text": "ROUTE = 0", "replace_text": "ROUTE = 100"}, "d"),   # the debugger
+    ]
+    ctx, state = start_run(env.sm, "proj", env.ws, "make app", require_git=False)
+    graph = env.build(checkpointer=make_checkpointer(env.ckpt_path))
+    cfg = {"configurable": {"thread_id": ctx.run_id, "project": ctx}, "recursion_limit": 200}
+    graph.invoke(state, cfg)
+    graph.invoke(Command(resume="yes"), cfg)
+    rows = {r["task_id"]: r["status"] for r in env.sm.list_tasks(ctx.run_id)}
+    assert rows == {1: "done", 2: "done"} and env.sm.get_run(ctx.run_id).status == "completed"
+    assert (env.ws / "app.py").read_text() == "ROUTE = 100\n"
+    assert "ROUTE = 0" in str(env.llm.calls[2][-1].content)                                         # the debugger was shown the file

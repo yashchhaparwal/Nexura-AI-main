@@ -301,7 +301,7 @@ def main() -> int:
     os.environ["NEXURA_RETRIEVAL_MODE"] = args.retrieval_mode
     config.PATCH_MODE = args.patch_mode
     os.environ["NEXURA_PATCH_MODE"] = args.patch_mode
-    config.PROMPT_VERSIONS.update(coder="3" if args.patch_mode == "v2" else "2", debugger="4" if args.patch_mode == "v2" else "3")
+    config.PROMPT_VERSIONS.update(coder="3" if args.patch_mode == "v2" else "2", debugger="6" if args.patch_mode == "v2" else "5")
     if args.retrieval_mode == "v2":
         from rag.embedder import FakeEmbedder, LocalEmbedder
         args.embedder_factory = (lambda: FakeEmbedder(dim=64)) if scripted else (
