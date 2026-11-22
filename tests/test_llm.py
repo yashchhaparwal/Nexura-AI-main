@@ -91,6 +91,15 @@ def test_short_rate_limits_are_still_retried(monkeypatch):
     assert failure is None and len(sleeps) == 1 and sleeps[0] >= 12
 
 
+def test_retried_attempts_are_logged_so_the_usage_budget_counts_them(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    logged = []
+    monkeypatch.setattr(llm, "_override", FakeChatModel(
+        script=[Exception("503 UNAVAILABLE"), Exception("429 RESOURCE_EXHAUSTED"), tool_call_msg("task_complete", {"summary": "x"})], calls=[]))
+    resp, failure = llm.invoke("coder", ["hi"], "1", on_log=lambda **kw: logged.append(kw["result"]))
+    assert failure is None and logged == ["retry_after_rate_limit", "retry_after_rate_limit", "ok"]   # 3 requests were made
+
+
 def test_planner_reports_quota_exhaustion_immediately(tmp_path, monkeypatch):
     monkeypatch.setenv("PLANNER_MODEL_NAME", "m")
     monkeypatch.setenv("GOOGLE_API_KEY", "dummy")

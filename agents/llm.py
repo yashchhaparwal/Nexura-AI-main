@@ -109,6 +109,8 @@ def invoke(role: str, messages: list, prompt_version: str, on_log=None) -> tuple
                 return None, f"LLM_ERROR: {_short(err, 150)}"
             detail = _short(err, 150)
             if attempt + 1 < config.LLM_MAX_ATTEMPTS:
+                if on_log:   # a failed attempt still counts against the provider's request quota: record it for the usage budget
+                    on_log(role=role, prompt_version=prompt_version, model=model, result="retry_after_rate_limit")
                 wait = backoff_delay(attempt, err)
                 print(f"  [!] Rate limited (attempt {attempt + 1}/{config.LLM_MAX_ATTEMPTS}). Waiting {wait:.1f}s...")
                 time.sleep(wait)
