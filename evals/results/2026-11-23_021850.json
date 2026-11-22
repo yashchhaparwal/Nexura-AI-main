@@ -1,0 +1,180 @@
+{
+  "date": "2026-11-23T02:18:50",
+  "commit": "9ede7d5",
+  "fake_llm": false,
+  "oracle": false,
+  "tasks_file": "tasks.yaml",
+  "retrieval_mode": "v1",
+  "patch_mode": "v1",
+  "temperature": 0.2,
+  "coder_model": "gemini-3.1-flash-lite-preview",
+  "planner_model": "gemini-3.1-flash-lite-preview",
+  "approval_level": "auto_within_limits",
+  "prompt_versions": {
+    "planner": "6",
+    "coder": "2",
+    "debugger": "3"
+  },
+  "summary": {
+    "tasks": 2,
+    "runs": 2,
+    "repeat": 1,
+    "passed": 2,
+    "pass_rate": 1.0,
+    "skipped": [],
+    "retries": 4,
+    "tool_calls": 25,
+    "approvals": 1,
+    "time_s": 298.0,
+    "tokens": 140392,
+    "tokens_per_run": {
+      "mean": 70196,
+      "min": 33493,
+      "max": 106899
+    },
+    "regressions": 0,
+    "retrieval_fallbacks": 0,
+    "index_s": null
+  },
+  "per_task": {
+    "fastapi_users": {
+      "runs": 1,
+      "passed": 1,
+      "pass_rate": 1.0,
+      "retries": {
+        "mean": 4,
+        "min": 4,
+        "max": 4
+      },
+      "tool_calls": {
+        "mean": 15,
+        "min": 15,
+        "max": 15
+      },
+      "tokens": {
+        "mean": 106899,
+        "min": 106899,
+        "max": 106899
+      },
+      "time_s": {
+        "mean": 188.7,
+        "min": 188.7,
+        "max": 188.7
+      },
+      "regressions": null
+    },
+    "streamlit_app": {
+      "runs": 1,
+      "passed": 1,
+      "pass_rate": 1.0,
+      "retries": {
+        "mean": 0,
+        "min": 0,
+        "max": 0
+      },
+      "tool_calls": {
+        "mean": 10,
+        "min": 10,
+        "max": 10
+      },
+      "tokens": {
+        "mean": 33493,
+        "min": 33493,
+        "max": 33493
+      },
+      "time_s": {
+        "mean": 109.3,
+        "min": 109.3,
+        "max": 109.3
+      },
+      "regressions": null
+    }
+  },
+  "results": [
+    {
+      "id": "fastapi_users",
+      "title": "FastAPI health and users endpoints",
+      "repeat": 1,
+      "passed": true,
+      "run_status": "completed_with_failures",
+      "tasks_total": 3,
+      "tasks_done": 2,
+      "retries": 4,
+      "error_types": {
+        "http_status_mismatch": 4
+      },
+      "tool_calls": 15,
+      "llm_calls": 16,
+      "approvals": 0,
+      "tokens": 106899,
+      "retrieval_fallbacks": 0,
+      "retrievals": 0,
+      "planner_context": false,
+      "task_errors": {
+        "3": "VERIFICATION_FAILED: - http_status: http://127.0.0.1:8765/ expected 200, got status 404. Server output: 7.0.0.1:56065 - \"GET / HTTP/1.1\" 404 Not Found\nINFO:     127.0.0.1:56066 - \"GET / HTTP/1.1\" 404 Not Found\nINFO:     127.0.0.1:56067 - \"GET / HTTP/1.1\" 404 Not Found\nINFO:     127.0.0.1:56068 - \"GET / HTTP/1.1\" 404 Not..."
+      },
+      "run_error": null,
+      "checks": [
+        {
+          "type": "file_exists",
+          "ok": true,
+          "detail": "app.py: exists"
+        },
+        {
+          "type": "http_status",
+          "ok": true,
+          "detail": "http://127.0.0.1:8765/health -> 200"
+        },
+        {
+          "type": "http_status",
+          "ok": true,
+          "detail": "http://127.0.0.1:8766/users -> 200"
+        }
+      ],
+      "time_s": 188.7
+    },
+    {
+      "id": "streamlit_app",
+      "title": "Streamlit data app",
+      "repeat": 1,
+      "passed": true,
+      "run_status": "completed",
+      "tasks_total": 3,
+      "tasks_done": 3,
+      "retries": 0,
+      "error_types": {},
+      "tool_calls": 10,
+      "llm_calls": 11,
+      "approvals": 1,
+      "tokens": 33493,
+      "retrieval_fallbacks": 0,
+      "retrievals": 0,
+      "planner_context": false,
+      "task_errors": {},
+      "run_error": null,
+      "checks": [
+        {
+          "type": "file_exists",
+          "ok": true,
+          "detail": "app.py: exists"
+        },
+        {
+          "type": "syntax_ok",
+          "ok": true,
+          "detail": "app.py: ok"
+        },
+        {
+          "type": "output_contains",
+          "ok": true,
+          "detail": "`python -c \"print('streamlit' in open('app.py').read())\"` output contains text"
+        },
+        {
+          "type": "file_exists",
+          "ok": true,
+          "detail": "requirements.txt: exists"
+        }
+      ],
+      "time_s": 109.3
+    }
+  ]
+}
