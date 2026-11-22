@@ -1,5 +1,6 @@
 """Bounded command runner and managed long-running processes. Kills whole process trees."""
 import os
+import re
 import subprocess
 import threading
 import uuid
@@ -7,6 +8,7 @@ from dataclasses import dataclass, field
 
 import psutil
 
+import config
 from core.safety import truncate
 
 
@@ -24,10 +26,25 @@ def kill_tree(pid: int) -> None:
     psutil.wait_procs(procs, timeout=5)
 
 
+# Credential-looking variable names: any underscore-separated word api_key / token / secret / password / credentials / access_key /
+# private_key (so GOOGLE_API_KEY, GROQ_API_KEY, NEXURA_TOKEN, AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN match; TOKENIZERS_PARALLELISM and PATH do not).
+_SECRET_NAME = re.compile(r"(^|_)(API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|ACCESS_?KEY|PRIVATE_?KEY)(_|$)", re.IGNORECASE)
+_ALWAYS_HIDDEN = {"SSH_AUTH_SOCK"}   # would let a command use your SSH keys without ever seeing them
+
+
+def scrub_env(env: dict | None = None) -> dict:
+    """The environment for a command the agent runs: `env` (default: ours) without credentials. Never mutates its argument."""
+    base = dict(os.environ if env is None else env)
+    if not config.SCRUB_ENV:
+        return base
+    return {k: v for k, v in base.items()
+            if k.upper() in config.ENV_PASSTHROUGH or not (_SECRET_NAME.search(k) or k.upper() in _ALWAYS_HIDDEN)}
+
+
 def _popen(argv: list[str], cwd: str, env: dict | None = None) -> subprocess.Popen:
     kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
     return subprocess.Popen(argv, cwd=cwd, shell=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1, env=env, **kw)
+                            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1, env=scrub_env(env), **kw)
 
 
 def _pump(proc: subprocess.Popen, lines: list[str], echo: bool) -> threading.Thread:

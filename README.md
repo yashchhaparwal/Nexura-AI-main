@@ -53,6 +53,7 @@ copy .env.example .env            # then edit .env (never commit it)
 | `NEXURA_FAILURE_POLICY` | `stop` (default) or `continue` |
 | `NEXURA_SHELL_HINT` | Text telling the model which shell/OS it is on |
 | `NEXURA_LLM_MAX_ATTEMPTS` | Tries per model call on rate limits / 503 "high demand" (default 6, backoff up to 60 s) |
+| `NEXURA_SCRUB_ENV`, `NEXURA_ENV_PASSTHROUGH` | Commands the agent runs get a copy of the environment WITHOUT credentials (any variable whose name has the word API_KEY, TOKEN, SECRET, PASSWORD, CREDENTIALS, ACCESS_KEY or PRIVATE_KEY, plus `SSH_AUTH_SOCK`), so code the model wrote cannot read your keys. On by default; `NEXURA_SCRUB_ENV=false` turns it off; `NEXURA_ENV_PASSTHROUGH=NAME1,NAME2` keeps the named variables |
 | `NEXURA_LLM_HARD_TIMEOUT_S` | Hard wall-clock limit for one model call (default `2 x NEXURA_LLM_TIMEOUT_S + 30` = 270 s). A call that stalls longer is abandoned and retried like any timeout, so a dead connection cannot hang a run |
 | `NEXURA_RETRIEVAL_MODE` | `v1` (default) or `v2`: retrieval context and a planner that knows the project (needs the index; falls back to v1). v2 also asks the planner for behaviour checks (not only syntax) and render-checks changed Streamlit pages |
 | `NEXURA_INDEXING_ENABLED` | `false` (default) or `true`: build/use the local code index |
@@ -107,6 +108,7 @@ Commands such as `poetry`, `yarn`, `pnpm`, `make`, `uv` need your one-time appro
 Summary below; full threat model in [docs/SECURITY.md](docs/SECURITY.md).
 
 - **Confinement:** all paths resolve (real paths, no `..`, no symlink escapes, Windows drives handled) inside the opened folder.
+- **Secrets:** commands the agent runs never inherit your API keys or tokens (see `NEXURA_SCRUB_ENV`); a script cannot read `GOOGLE_API_KEY` from its environment. It is not a sandbox: a script can still read files your user can read.
 - **Commands:** one allowlisted program (`python`, `pip`, `node`, `npm`, `npx`, `uvicorn`, `pytest`, `streamlit`, `flask`), no shell,
   no operators outside quotes; installs only through `install_dependency` and only with your approval; servers run as managed processes that are
   killed (whole tree) at task end.

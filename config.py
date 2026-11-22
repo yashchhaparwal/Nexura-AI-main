@@ -85,6 +85,10 @@ BUDGET_MAX_TOKENS = env_limit("NEXURA_BUDGET_MAX_TOKENS")       # 0 = no cap
 BUDGET_WINDOW_HOURS = env_int("NEXURA_BUDGET_WINDOW_HOURS", 24)
 
 # --- Safety ------------------------------------------------
+# Commands the agent runs (python, node, pytest, servers...) get a COPY of the environment without credentials, so code the
+# model wrote cannot read your API keys. Names listed in NEXURA_ENV_PASSTHROUGH (comma separated) are kept; SCRUB_ENV=false turns it off.
+SCRUB_ENV = env_bool("NEXURA_SCRUB_ENV", True)
+ENV_PASSTHROUGH = frozenset(n.strip().upper() for n in os.getenv("NEXURA_ENV_PASSTHROUGH", "").split(",") if n.strip())
 ALLOWED_COMMANDS = ["python", "python3", "py", "pip", "pip3", "node", "npm", "npx", "uvicorn", "pytest", "streamlit", "flask"]
 # V2: executables a user may approve PER WORKSPACE (never loosens the default list; see core.safety.parse_command)
 EXTRA_COMMAND_CANDIDATES = ["poetry", "yarn", "pnpm", "make", "uv", "tox", "pipenv"]

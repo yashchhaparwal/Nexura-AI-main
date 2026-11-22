@@ -1,0 +1,303 @@
+{
+  "date": "2026-11-23T01:54:25",
+  "commit": "a9b06e2",
+  "fake_llm": false,
+  "oracle": false,
+  "tasks_file": "tasks.yaml",
+  "retrieval_mode": "v1",
+  "patch_mode": "v1",
+  "temperature": 0.2,
+  "coder_model": "gemini-3.1-flash-lite-preview",
+  "planner_model": "gemini-3.1-flash-lite-preview",
+  "approval_level": "auto_within_limits",
+  "prompt_versions": {
+    "planner": "6",
+    "coder": "2",
+    "debugger": "1"
+  },
+  "summary": {
+    "tasks": 4,
+    "runs": 4,
+    "repeat": 1,
+    "passed": 4,
+    "pass_rate": 1.0,
+    "skipped": [],
+    "retries": 8,
+    "tool_calls": 74,
+    "approvals": 5,
+    "time_s": 1212.1,
+    "tokens": 275344,
+    "tokens_per_run": {
+      "mean": 68836,
+      "min": 52218,
+      "max": 87404
+    },
+    "regressions": 0,
+    "retrieval_fallbacks": 0,
+    "index_s": null
+  },
+  "per_task": {
+    "fastapi_users": {
+      "runs": 1,
+      "passed": 1,
+      "pass_rate": 1.0,
+      "retries": {
+        "mean": 4,
+        "min": 4,
+        "max": 4
+      },
+      "tool_calls": {
+        "mean": 18,
+        "min": 18,
+        "max": 18
+      },
+      "tokens": {
+        "mean": 52218,
+        "min": 52218,
+        "max": 52218
+      },
+      "time_s": {
+        "mean": 229.4,
+        "min": 229.4,
+        "max": 229.4
+      },
+      "regressions": null
+    },
+    "streamlit_app": {
+      "runs": 1,
+      "passed": 1,
+      "pass_rate": 1.0,
+      "retries": {
+        "mean": 4,
+        "min": 4,
+        "max": 4
+      },
+      "tool_calls": {
+        "mean": 12,
+        "min": 12,
+        "max": 12
+      },
+      "tokens": {
+        "mean": 87404,
+        "min": 87404,
+        "max": 87404
+      },
+      "time_s": {
+        "mean": 759.5,
+        "min": 759.5,
+        "max": 759.5
+      },
+      "regressions": null
+    },
+    "package_bugfix": {
+      "runs": 1,
+      "passed": 1,
+      "pass_rate": 1.0,
+      "retries": {
+        "mean": 0,
+        "min": 0,
+        "max": 0
+      },
+      "tool_calls": {
+        "mean": 23,
+        "min": 23,
+        "max": 23
+      },
+      "tokens": {
+        "mean": 65202,
+        "min": 65202,
+        "max": 65202
+      },
+      "time_s": {
+        "mean": 110.4,
+        "min": 110.4,
+        "max": 110.4
+      },
+      "regressions": null
+    },
+    "validators": {
+      "runs": 1,
+      "passed": 1,
+      "pass_rate": 1.0,
+      "retries": {
+        "mean": 0,
+        "min": 0,
+        "max": 0
+      },
+      "tool_calls": {
+        "mean": 21,
+        "min": 21,
+        "max": 21
+      },
+      "tokens": {
+        "mean": 70520,
+        "min": 70520,
+        "max": 70520
+      },
+      "time_s": {
+        "mean": 112.8,
+        "min": 112.8,
+        "max": 112.8
+      },
+      "regressions": null
+    }
+  },
+  "results": [
+    {
+      "id": "fastapi_users",
+      "title": "FastAPI health and users endpoints",
+      "repeat": 1,
+      "passed": true,
+      "run_status": "completed_with_failures",
+      "tasks_total": 3,
+      "tasks_done": 2,
+      "retries": 4,
+      "error_types": {
+        "port_in_use": 4
+      },
+      "tool_calls": 18,
+      "llm_calls": 19,
+      "approvals": 1,
+      "tokens": 52218,
+      "retrieval_fallbacks": 0,
+      "retrievals": 0,
+      "planner_context": false,
+      "task_errors": {
+        "3": "VERIFICATION_FAILED: - http_status: http://127.0.0.1:8765/ expected 200, got status 404. Server output: :     Started server process [24124]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8765): [winerror ..."
+      },
+      "run_error": null,
+      "checks": [
+        {
+          "type": "file_exists",
+          "ok": true,
+          "detail": "app.py: exists"
+        },
+        {
+          "type": "http_status",
+          "ok": true,
+          "detail": "http://127.0.0.1:8765/health -> 200"
+        },
+        {
+          "type": "http_status",
+          "ok": true,
+          "detail": "http://127.0.0.1:8766/users -> 200"
+        }
+      ],
+      "time_s": 229.4
+    },
+    {
+      "id": "streamlit_app",
+      "title": "Streamlit data app",
+      "repeat": 1,
+      "passed": true,
+      "run_status": "completed_with_failures",
+      "tasks_total": 3,
+      "tasks_done": 2,
+      "retries": 4,
+      "error_types": {
+        "rejected:NOT_FOUND": 1,
+        "rejected:USE_INSTALL_DEPENDENCY": 3
+      },
+      "tool_calls": 12,
+      "llm_calls": 17,
+      "approvals": 4,
+      "tokens": 87404,
+      "retrieval_fallbacks": 0,
+      "retrievals": 0,
+      "planner_context": false,
+      "task_errors": {
+        "3": "VALIDATION_REJECTED: USE_INSTALL_DEPENDENCY: Install packages with the install_dependency tool."
+      },
+      "run_error": null,
+      "checks": [
+        {
+          "type": "file_exists",
+          "ok": true,
+          "detail": "app.py: exists"
+        },
+        {
+          "type": "syntax_ok",
+          "ok": true,
+          "detail": "app.py: ok"
+        },
+        {
+          "type": "output_contains",
+          "ok": true,
+          "detail": "`python -c \"print('streamlit' in open('app.py').read())\"` output contains text"
+        },
+        {
+          "type": "file_exists",
+          "ok": true,
+          "detail": "requirements.txt: exists"
+        }
+      ],
+      "time_s": 759.5
+    },
+    {
+      "id": "package_bugfix",
+      "title": "Fix a bug in a multi-file package",
+      "repeat": 1,
+      "passed": true,
+      "run_status": "completed",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "retries": 0,
+      "error_types": {},
+      "tool_calls": 23,
+      "llm_calls": 25,
+      "approvals": 0,
+      "tokens": 65202,
+      "retrieval_fallbacks": 0,
+      "retrievals": 0,
+      "planner_context": false,
+      "task_errors": {},
+      "run_error": null,
+      "checks": [
+        {
+          "type": "command_ok",
+          "ok": true,
+          "detail": "`python -m pytest -q` exited 0"
+        },
+        {
+          "type": "output_contains",
+          "ok": true,
+          "detail": "`python -c \"import mathlib; print(mathlib.mean([2, 4]))\"` output contains text"
+        }
+      ],
+      "time_s": 110.4
+    },
+    {
+      "id": "validators",
+      "title": "Input validators",
+      "repeat": 1,
+      "passed": true,
+      "run_status": "completed",
+      "tasks_total": 3,
+      "tasks_done": 3,
+      "retries": 0,
+      "error_types": {},
+      "tool_calls": 21,
+      "llm_calls": 24,
+      "approvals": 0,
+      "tokens": 70520,
+      "retrieval_fallbacks": 0,
+      "retrievals": 0,
+      "planner_context": false,
+      "task_errors": {},
+      "run_error": null,
+      "checks": [
+        {
+          "type": "output_contains",
+          "ok": true,
+          "detail": "`python -c \"import validators as v; print(v.is_email('a@b.co'), v.is_email('a@b'))\"` output contains text"
+        },
+        {
+          "type": "output_contains",
+          "ok": true,
+          "detail": "`python -c \"import validators as v; print(v.is_phone('+1 555-123-4567'), v.is_phone('12'))\"` output contains text"
+        }
+      ],
+      "time_s": 112.8
+    }
+  ]
+}
