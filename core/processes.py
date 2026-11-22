@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 
@@ -84,6 +85,8 @@ class ManagedProcess:
     command: str
     lines: list[str] = field(default_factory=list)
     read_upto: int = 0
+    argv: list[str] = field(default_factory=list)   # how to start it again
+    cwd: str = ""
 
 
 class ProcessManager:
@@ -93,7 +96,7 @@ class ProcessManager:
         self._procs: dict[str, ManagedProcess] = {}
 
     def start(self, argv: list[str], cwd: str, command: str) -> str:
-        mp = ManagedProcess(_popen(argv, cwd), command)
+        mp = ManagedProcess(_popen(argv, cwd), command, argv=list(argv), cwd=cwd)
         _pump(mp.proc, mp.lines, echo=False)
         handle = uuid.uuid4().hex[:8]
         self._procs[handle] = mp
@@ -124,19 +127,35 @@ class ProcessManager:
         for h in list(self._procs):
             self.stop(h)
 
-    def stop_same_server(self, command: str) -> int:
-        """Stop managed processes that run `command` (ignoring spacing) or serve on the same port. Returns how many were still running.
-        A check that starts its own server must not talk to an older instance of the same app: the agent's server keeps the old code
-        and the port, so the new one fails to bind and the check sees the stale answer (a live run got 404 four times for a route
-        that had already been added)."""
+    def restart_servers(self, wait_s: float = 8.0) -> int:
+        """Restart the managed processes that are web servers (a command whose port can be told, e.g. uvicorn/flask/streamlit/http.server),
+        keeping their handles, so they run the code as it is NOW. Returns how many were restarted.
+        Why: a server the agent started earlier keeps the old code and the port; a check that then reads it sees a stale answer (a live
+        run got 404 four times for a route that had already been added). Stopping it instead broke later checks that call the same
+        server, so it is restarted and waited for. Processes without a recognisable port (workers, databases) are left alone."""
+        import socket
+        from urllib.parse import urlparse
+
         from core.schemas import infer_url
-        want, want_url = " ".join(command.split()), infer_url(command)
-        running = 0
-        for h, mp in list(self._procs.items()):
-            if " ".join(mp.command.split()) == want or (want_url is not None and infer_url(mp.command) == want_url):
-                running += mp.proc.poll() is None
-                self.stop(h)
-        return running
+        waiting = []
+        for h, old in list(self._procs.items()):
+            url = infer_url(old.command)
+            if url is None or not old.argv:
+                continue
+            kill_tree(old.proc.pid)
+            fresh = ManagedProcess(_popen(old.argv, old.cwd), old.command, argv=old.argv, cwd=old.cwd)
+            _pump(fresh.proc, fresh.lines, echo=False)
+            self._procs[h] = fresh
+            waiting.append(urlparse(url).port)
+        deadline = time.monotonic() + wait_s
+        for port in waiting:     # until each accepts connections (or the time is up: the check then reports what it sees)
+            while time.monotonic() < deadline:
+                try:
+                    socket.create_connection(("127.0.0.1", port), timeout=0.3).close()
+                    break
+                except OSError:
+                    time.sleep(0.1)
+        return len(waiting)
 
     def __len__(self):
         return len(self._procs)

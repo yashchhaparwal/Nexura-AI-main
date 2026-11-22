@@ -40,9 +40,6 @@ def _http(ctx: ProjectContext, a: dict, sleep) -> CheckResult:
     handle = None
     try:
         if a.get("start_command"):
-            stale = ctx.backend.stop_same_server(a["start_command"])   # the agent's own server of this app would keep the port and the old code
-            if stale:
-                ctx.emit("stale_server_stopped", command=a["start_command"], count=stale)
             r = _run("start_process", ctx, command=a["start_command"])
             if not r.ok:
                 return CheckResult(type="http_status", ok=False, detail=f"could not start `{a['start_command']}`: {r.stderr}")
@@ -72,6 +69,10 @@ def verify(task: dict, ctx: ProjectContext, changed_files: list[str], command_re
     and require the LAST run of every distinct command to have exited 0."""
     checks: list[CheckResult] = []
     acceptance = task.get("acceptance") or []
+    if len(ctx.backend):   # servers the agent left running keep the code (and port) they started with: check the code as it is now
+        restarted = ctx.backend.restart_servers()
+        if restarted:
+            ctx.emit("servers_restarted", count=restarted)
     for a in acceptance:
         t = a["type"]
         if t == "file_exists":
