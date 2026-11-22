@@ -16,7 +16,7 @@ HINTS = {
                           "If it is a LOCAL package, run tests with `python -m pytest` (it puts the project root on sys.path; bare `pytest` does not).",
     "import_error": "An import failed: check the module/file names and the import path.",
     "syntax_error": "There is a syntax error: re-read the file and fix the exact line reported.",
-    "http_status_mismatch": "A check requests a URL and the app answered with the wrong status (404 = that route does not exist). The check, its URL and its port are fixed by the plan: change the CODE so that exact URL answers as expected (for example add the missing route). Do not change the port; a bind error in the server log is a side effect.",
+    "http_status_mismatch": "A check requests a URL and the app answered with the wrong status (404 = that route does not exist). The check, its URL and its port are fixed by the plan: change the CODE so that exact URL answers as expected (for example add the missing route). Do not change the port. (A bind error in the server log means an older copy of the app may still be running on that port; Nexura stops its own before a check, so look at the code first.)",
     "port_in_use": "The port is busy: use a different port or stop the process using it.",
     "test_failure": "A test failed: read the assertion, compare expected vs actual, fix the code under test.",
     "unknown": "Read the error output carefully and fix the root cause.",

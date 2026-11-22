@@ -34,6 +34,10 @@ class ExecutionBackend(ABC):
     @abstractmethod
     def stop_all(self) -> None: ...
 
+    def stop_same_server(self, command: str) -> int:
+        """Stop background processes that run this server command or use its port; the number that were running. Default: none."""
+        return 0
+
     @abstractmethod
     def pid(self, handle: str) -> int | None: ...
 
@@ -68,6 +72,9 @@ class LocalBackend(ExecutionBackend):
 
     def stop_all(self) -> None:
         self._procs.stop_all()
+
+    def stop_same_server(self, command: str) -> int:
+        return self._procs.stop_same_server(command)
 
     def pid(self, handle):
         return self._procs.pid(handle)

@@ -124,5 +124,19 @@ class ProcessManager:
         for h in list(self._procs):
             self.stop(h)
 
+    def stop_same_server(self, command: str) -> int:
+        """Stop managed processes that run `command` (ignoring spacing) or serve on the same port. Returns how many were still running.
+        A check that starts its own server must not talk to an older instance of the same app: the agent's server keeps the old code
+        and the port, so the new one fails to bind and the check sees the stale answer (a live run got 404 four times for a route
+        that had already been added)."""
+        from core.schemas import infer_url
+        want, want_url = " ".join(command.split()), infer_url(command)
+        running = 0
+        for h, mp in list(self._procs.items()):
+            if " ".join(mp.command.split()) == want or (want_url is not None and infer_url(mp.command) == want_url):
+                running += mp.proc.poll() is None
+                self.stop(h)
+        return running
+
     def __len__(self):
         return len(self._procs)

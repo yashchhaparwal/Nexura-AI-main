@@ -198,3 +198,76 @@ def test_pipeline_a_step_that_changes_nothing_is_fixed_by_the_debugger_in_one_ro
     assert rows == {1: "done", 2: "done"} and env.sm.get_run(ctx.run_id).status == "completed"
     assert (env.ws / "app.py").read_text() == "ROUTE = 100\n"
     assert "ROUTE = 0" in str(env.llm.calls[2][-1].content)                                         # the debugger was shown the file
+
+
+# ─── the check must not talk to an older copy of the app ───
+
+import sys  # noqa: E402
+import time  # noqa: E402
+
+from core import verification  # noqa: E402
+from core.processes import ProcessManager  # noqa: E402
+from tests.test_control_plane import ctx as run_ctx, free_port, task as make_task  # noqa: E402,F401  (run_ctx is a fixture)
+
+SLEEP = [sys.executable, "-c", "import time; time.sleep(60)"]
+
+
+def test_stop_same_server_matches_the_command_or_the_port_and_nothing_else(tmp_path):
+    pm = ProcessManager()
+    same = pm.start(SLEEP, str(tmp_path), "python -m uvicorn app:app --port 9100")
+    same_port = pm.start(SLEEP, str(tmp_path), "uvicorn other:app --port 9100")
+    other_port = pm.start(SLEEP, str(tmp_path), "python -m uvicorn app:app --port 9101")
+    unrelated = pm.start(SLEEP, str(tmp_path), "python worker.py")
+    try:
+        assert pm.stop_same_server("python  -m uvicorn app:app --port  9100") == 2      # spacing is ignored; same port counts
+        assert pm.pid(same) is None and pm.pid(same_port) is None
+        assert pm.pid(other_port) is not None and pm.pid(unrelated) is not None        # untouched
+        assert pm.stop_same_server("python -m uvicorn app:app --port 9100") == 0       # nothing left to stop
+    finally:
+        pm.stop_all()
+
+
+def test_the_http_check_gets_a_fresh_server_not_the_agents_stale_one(run_ctx, workspace):    # noqa: F811
+    """The 2026-11-23 live run: the route was added to app.py, but the server started earlier still ran the old code and held the
+    port, so the check's own server could not bind and the check read the old answer (404) four times."""
+    port = free_port()
+    script = (
+        "import http.server, sys\n"
+        "class H(http.server.BaseHTTPRequestHandler):\n"
+        "    def do_GET(self):\n"
+        "        self.send_response(%d); self.end_headers(); self.wfile.write(b'x')\n"
+        "    def log_message(self, *a): pass\n"
+        "http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()\n")
+    (workspace / "server.py").write_text(script % 404)                       # the OLD code: no route, answers 404
+    command = f"python server.py {port}"
+    stale = run_ctx.backend.start_process([sys.executable, "server.py", str(port)], str(workspace), command)   # what the coder's start_process did
+    try:
+        for _ in range(100):                                              # wait until the old server answers
+            try:
+                import urllib.error
+                import urllib.request
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1)
+            except urllib.error.HTTPError:
+                break
+            except OSError:
+                time.sleep(0.1)
+        (workspace / "server.py").write_text(script % 200)                  # the debugger fixed the code; the old process is still running
+        r = verification.verify(make_task({"type": "http_status", "start_command": command, "url": f"http://127.0.0.1:{port}/",
+                                           "expect": 200, "wait_s": 15}), run_ctx, [], [])
+        assert r.ok, r.failure_text()
+        assert run_ctx.backend.pid(stale) is None                          # the stale server was stopped, not left running
+    finally:
+        run_ctx.backend.stop_all()
+
+
+def test_a_check_without_a_start_command_still_uses_the_agents_running_server(run_ctx, workspace):    # noqa: F811
+    port = free_port()
+    (workspace / "server.py").write_text(
+        "import http.server, sys\nhttp.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), http.server.SimpleHTTPRequestHandler).serve_forever()\n")
+    handle = run_ctx.backend.start_process([sys.executable, "server.py", str(port)], str(workspace), f"python server.py {port}")
+    try:
+        r = verification.verify(make_task({"type": "http_status", "url": f"http://127.0.0.1:{port}/", "expect": 200, "wait_s": 15}), run_ctx, [], [])
+        assert r.ok, r.failure_text()
+        assert run_ctx.backend.pid(handle) is not None                      # nothing was stopped
+    finally:
+        run_ctx.backend.stop_all()
