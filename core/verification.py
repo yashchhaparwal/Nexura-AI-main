@@ -32,7 +32,7 @@ def _command(ctx: ProjectContext, a: dict, kind: str) -> CheckResult:
                        f"failed ({r.code}, exit={r.exit_code}): {(r.stdout or r.stderr)[-600:]}"))
 
 
-def _http(ctx: ProjectContext, a: dict, sleep) -> CheckResult:
+def _http(ctx: ProjectContext, a: dict, sleep, keep: list | None = None) -> CheckResult:
     url = a["url"]
     if (urlparse(url).hostname or "").lower() not in ("localhost", "127.0.0.1", "::1"):
         return CheckResult(type="http_status", ok=False, detail=f"only localhost URLs are allowed: {url}")
@@ -60,7 +60,10 @@ def _http(ctx: ProjectContext, a: dict, sleep) -> CheckResult:
         return CheckResult(type="http_status", ok=False, detail=f"{url} expected {expect}, got {last}. Server output: {out}")
     finally:
         if handle:
-            _run("stop_process", ctx, metadata={"handle": handle})
+            if keep is not None:   # later checks of the same step may call this server (see verify)
+                keep.append(handle)
+            else:
+                _run("stop_process", ctx, metadata={"handle": handle})
 
 
 def verify(task: dict, ctx: ProjectContext, changed_files: list[str], command_results: list[dict],
@@ -73,19 +76,24 @@ def verify(task: dict, ctx: ProjectContext, changed_files: list[str], command_re
         restarted = ctx.backend.restart_servers()
         if restarted:
             ctx.emit("servers_restarted", count=restarted)
-    for a in acceptance:
-        t = a["type"]
-        if t == "file_exists":
-            r = _run("file_exists", ctx, path=a["path"])
-            checks.append(CheckResult(type=t, ok=r.ok, detail=f"{a['path']}: " + ("exists" if r.ok else "missing")))
-        elif t == "syntax_ok":
-            checks += [_syntax(ctx, p) for p in a["paths"]]
-        elif t in ("command_ok", "output_contains"):
-            checks.append(_command(ctx, a, t))
-        elif t == "http_status":
-            checks.append(_http(ctx, a, sleep))
-        else:
-            checks.append(CheckResult(type=t, ok=False, detail="unknown acceptance type"))
+    started: list[str] = []   # servers an http_status check started: they stay up for the step's later checks and are stopped below
+    try:                      # (a plan reads "start the server, then query it"; a live run failed 4 times because the server was gone)
+        for a in acceptance:
+            t = a["type"]
+            if t == "file_exists":
+                r = _run("file_exists", ctx, path=a["path"])
+                checks.append(CheckResult(type=t, ok=r.ok, detail=f"{a['path']}: " + ("exists" if r.ok else "missing")))
+            elif t == "syntax_ok":
+                checks += [_syntax(ctx, p) for p in a["paths"]]
+            elif t in ("command_ok", "output_contains"):
+                checks.append(_command(ctx, a, t))
+            elif t == "http_status":
+                checks.append(_http(ctx, a, sleep, started))
+            else:
+                checks.append(CheckResult(type=t, ok=False, detail="unknown acceptance type"))
+    finally:
+        for handle in started:
+            _run("stop_process", ctx, metadata={"handle": handle})
     if not acceptance:
         checks += [_syntax(ctx, f) for f in changed_files]
         last = {}

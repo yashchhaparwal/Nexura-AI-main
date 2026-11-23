@@ -400,3 +400,45 @@ def test_the_note_reaches_the_debugger_prompt(monkeypatch, tmp_path):
     assert "only used list_directory and changed nothing" in prompt and "Change the code now" in prompt
     quiet, _ = _run_debugger_node(monkeypatch, tmp_path, _debug_state([{"file": "app.py"}]))
     assert "changed nothing" not in quiet
+
+
+# ─── a server a check starts stays up for the step's later checks ───
+
+def _probe(port):
+    q = chr(39)
+    return 'python -c "import urllib.request as u; print(u.urlopen(' + q + f"http://127.0.0.1:{port}/" + q + ').status)"'
+
+
+def test_a_server_started_by_a_check_is_still_up_for_the_checks_after_it_and_then_stopped(run_ctx, workspace):    # noqa: F811
+    """The 2026-11-23 live run: the coder had stopped its own server, the plan's first check started one and shut it down again, and the
+    two checks after it (requests.get on the same port) could never pass; the debugger has no tool to start a server."""
+    port = free_port()
+    (workspace / "server.py").write_text(SERVER % 200)
+    assert len(run_ctx.backend) == 0                                            # the agent left nothing running
+    r = verification.verify(make_task(
+        {"type": "http_status", "start_command": f"python server.py --port {port}", "url": f"http://127.0.0.1:{port}/", "expect": 200, "wait_s": 15},
+        {"type": "output_contains", "command": _probe(port), "text": "200"},
+        {"type": "command_ok", "command": _probe(port)}), run_ctx, [], [])
+    assert r.ok, r.failure_text()
+    assert len(run_ctx.backend) == 0                                            # nothing is left running after the step's checks
+    assert _status(port) is None
+
+
+def test_the_check_server_is_stopped_even_when_a_later_check_fails(run_ctx, workspace):    # noqa: F811
+    port = free_port()
+    (workspace / "server.py").write_text(SERVER % 200)
+    r = verification.verify(make_task(
+        {"type": "http_status", "start_command": f"python server.py --port {port}", "url": f"http://127.0.0.1:{port}/", "expect": 200, "wait_s": 15},
+        {"type": "output_contains", "command": _probe(port), "text": "999"}), run_ctx, [], [])
+    assert not r.ok and "999" in r.failure_text()
+    assert len(run_ctx.backend) == 0 and _status(port) is None
+
+
+def test_the_check_server_is_stopped_when_its_own_check_fails(run_ctx, workspace):    # noqa: F811
+    port = free_port()
+    (workspace / "server.py").write_text(SERVER % 404)
+    r = verification.verify(make_task(
+        {"type": "http_status", "start_command": f"python server.py --port {port}", "url": f"http://127.0.0.1:{port}/", "expect": 200, "wait_s": 3}),
+        run_ctx, [], [])
+    assert not r.ok and "got status 404" in r.failure_text()
+    assert len(run_ctx.backend) == 0 and _status(port) is None
