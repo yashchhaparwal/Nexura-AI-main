@@ -1,5 +1,7 @@
 """Failure handling found by the 2026-11-23 eval: a debugger that could not install a missing package, a 404 reported as
 'port in use', and a check on '/' for an app described by other routes."""
+import json
+
 import pytest
 
 import config
@@ -291,3 +293,110 @@ def test_nothing_is_restarted_when_the_agent_left_no_server_running(run_ctx, wor
     assert len(run_ctx.backend) == 0 and run_ctx.backend.restart_servers() == 0
     (workspace / "a.py").write_text("x = 1\n")
     assert verification.verify(make_task({"type": "file_exists", "path": "a.py"}), run_ctx, [], []).ok
+
+
+# ─── a new project's check on "/" is rewritten to a route the request names ───
+
+from core.task_manager import fix_root_url_checks, named_routes  # noqa: E402
+from tests.test_planner_and_tasks import planner  # noqa: E402,F401  (a fixture)
+from core.schemas import ExecutionPlan  # noqa: E402
+
+API_PROMPT = 'Create a FastAPI app with GET /health returning ok and GET /users returning a list. Start it with uvicorn on --port 8765.'
+
+
+def _api_plan(url="http://127.0.0.1:8765/", extra=None):
+    acc = {"type": "http_status", "start_command": "python -m uvicorn app:app --port 8765", "url": url, **(extra or {})}
+    return ExecutionPlan.model_validate({"project_id": "p", "goal": "g", "steps": [
+        {"step_id": 1, "title": "write", "description": "d", "dependencies": [], "acceptance": [{"type": "file_exists", "path": "app.py"}]},
+        {"step_id": 2, "title": "serve", "description": "d", "dependencies": [1], "acceptance": [acc]}]})
+
+
+def test_named_routes_are_ordered_and_skip_path_parameters_and_prose():
+    assert named_routes(API_PROMPT) == ["/health", "/users"]
+    assert named_routes("GET /users/{id} and /items/<name> and and/or HTML/CSS in src/app.py") == []
+    assert named_routes("GET /b then /a then /b again") == ["/b", "/a"]
+
+
+def test_the_root_check_becomes_the_health_route_and_the_change_is_reported():
+    plan = _api_plan()
+    notes = fix_root_url_checks(plan, API_PROMPT)
+    assert plan.steps[1].acceptance[0].url == "http://127.0.0.1:8765/health"
+    assert len(notes) == 1 and "step 2" in notes[0] and "changed the check URL" in notes[0] and "/health" in notes[0]
+
+
+def test_without_a_health_route_the_first_named_route_is_used_and_query_is_kept():
+    plan = _api_plan(url="http://127.0.0.1:8765/?x=1")
+    fix_root_url_checks(plan, "An API with GET /items and GET /users")
+    assert plan.steps[1].acceptance[0].url == "http://127.0.0.1:8765/items?x=1"
+
+
+@pytest.mark.parametrize("prompt", ["App with GET / returning hello and GET /health", "A homepage plus a /health page", "A flask hello world app"])
+def test_nothing_is_rewritten_when_the_root_is_wanted_or_no_route_is_named(prompt):
+    plan = _api_plan()
+    assert fix_root_url_checks(plan, prompt) == [] and plan.steps[1].acceptance[0].url == "http://127.0.0.1:8765/"
+
+
+def test_a_check_that_already_targets_a_route_is_left_alone():
+    plan = _api_plan(url="http://127.0.0.1:8765/users")
+    assert fix_root_url_checks(plan, API_PROMPT) == [] and plan.steps[1].acceptance[0].url == "http://127.0.0.1:8765/users"
+
+
+def _plan_reply(url=None):
+    acc = {"type": "http_status", "start_command": "python -m uvicorn app:app --port 8765"}
+    if url:
+        acc["url"] = url
+    return json.dumps({"project_id": "p", "goal": "g", "steps": [
+        {"step_id": 1, "title": "serve", "description": "d", "dependencies": [], "acceptance": [acc]}]})
+
+
+def test_the_planner_rewrites_for_a_new_project_even_when_the_url_was_inferred(planner):    # noqa: F811
+    planner.replies = [_plan_reply()]                                      # no url: Nexura infers the server root
+    out = planner.plan(API_PROMPT, planner.path)
+    assert out.steps[0].acceptance[0].url == "http://127.0.0.1:8765/health"
+    assert any("changed the check URL" in w for w in planner.last_warnings)
+    assert "/health" in open(planner.path + "/plan.json", encoding="utf-8").read()          # the saved plan agrees with what runs
+
+
+def test_the_planner_only_warns_for_an_existing_project(planner):    # noqa: F811
+    planner.replies = [_plan_reply(url="http://127.0.0.1:8765/")]
+    out = planner.plan(API_PROMPT, planner.path, context={"exists": lambda p: True, "files": [], "files_total": 0, "hits": []})
+    assert out.steps[0].acceptance[0].url == "http://127.0.0.1:8765/"      # unchanged: "/" may be that project's real home page
+    assert not any("changed the check URL" in w for w in planner.last_warnings)
+
+
+# ─── the debugger is told when its last round only looked ───
+
+from core.orchestrator import _idle_debug_round  # noqa: E402
+
+
+def _hist(*tools, step=4):
+    return [{"step_id": step, "tool": t, "args": "", "result": "", "status": "ok"} for t in tools]
+
+
+TASK4 = {"step_id": 4}
+
+
+def test_a_debug_round_that_only_looked_is_reported():
+    h = _hist("start_process", "task_complete", "verification", "list_directory", "verification")
+    assert _idle_debug_round({"execution_history": h}, TASK4) == ["list_directory"]
+    h2 = _hist("verification", "list_directory", "read_file", "verification")
+    assert _idle_debug_round({"execution_history": h2}, TASK4) == ["list_directory", "read_file"]
+
+
+def test_rounds_that_changed_something_or_belong_to_the_coder_or_other_steps_are_not_reported():
+    assert _idle_debug_round({"execution_history": _hist("verification", "patch_file", "verification")}, TASK4) is None
+    assert _idle_debug_round({"execution_history": _hist("verification", "list_directory", "patch_file", "verification")}, TASK4) is None
+    assert _idle_debug_round({"execution_history": _hist("list_directory", "verification")}, TASK4) is None      # first debug round: the coder's work
+    assert _idle_debug_round({"execution_history": _hist("verification", "verification")}, TASK4) is None        # nothing proposed
+    other = _hist("verification", "list_directory", "verification", step=3)
+    assert _idle_debug_round({"execution_history": other}, TASK4) is None
+
+
+def test_the_note_reaches_the_debugger_prompt(monkeypatch, tmp_path):
+    (tmp_path / "app.py").write_text("x = 1")
+    state = _debug_state([{"file": "app.py"}])
+    state["execution_history"] = _hist("verification", "list_directory", "verification")
+    prompt, _ = _run_debugger_node(monkeypatch, tmp_path, state)
+    assert "only used list_directory and changed nothing" in prompt and "Change the code now" in prompt
+    quiet, _ = _run_debugger_node(monkeypatch, tmp_path, _debug_state([{"file": "app.py"}]))
+    assert "changed nothing" not in quiet

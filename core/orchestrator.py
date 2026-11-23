@@ -309,6 +309,21 @@ def coder_node(state: NexuraState, config: RunnableConfig) -> dict:
     return _agent_turn(state, coder.propose, "coder", config)
 
 
+READ_ONLY_TOOLS = {"list_directory", "read_file", "verify_code_syntax", "read_process_output"}
+
+
+def _idle_debug_round(state: NexuraState, task: dict) -> list[str] | None:
+    """Tools of the debugger's previous round if it only looked at things (nothing was changed, so the check will fail exactly the same
+    way), else None. The rounds of a step are separated by its `verification` entries in the execution history; the first debug round
+    follows the coder's work, which does not count."""
+    hist = [h for h in state.get("execution_history") or [] if h.get("step_id") == task["step_id"]]
+    marks = [i for i, h in enumerate(hist) if h.get("tool") == "verification"]
+    if len(marks) < 2:
+        return None
+    tools = [h["tool"] for h in hist[marks[-2] + 1:marks[-1]]]
+    return tools if tools and all(t in READ_ONLY_TOOLS for t in tools) else None
+
+
 def debugger_node(state: NexuraState, config: RunnableConfig) -> dict:
     """Builds a focused prompt from the failure and asks the Debugger for fixes (proposals only)."""
     ctx, task = _ctx(config), _cur(state)
@@ -328,8 +343,11 @@ def debugger_node(state: NexuraState, config: RunnableConfig) -> dict:
             continue
         files[n] = body
         ctx.files_read.add(ctx.key(ctx.root / n))  # shown to the debugger, so it counts as read
+    idle = _idle_debug_round(state, task)
+    idle_note = (f"{chr(10)}Your previous attempt only used {', '.join(sorted(set(idle)))} and changed nothing, so the check failed in exactly the same way. "
+                 "Do not look again: the relevant files are shown below. Change the code now.") if idle else ""
     prompt = debugger.build_prompt(task, state.get("verify_failure") or "", state.get("error_type") or "unknown",
-                                   (state.get("retry_hint") or "") + (
+                                   (state.get("retry_hint") or "") + idle_note + (
                                        "\nYour previous proposal was rejected: " + state["last_rejection"] if state.get("last_rejection") else ""),
                                    files, earlier_files=earlier)
     print(f"  [Debugger] attempt {state.get('attempts', 0)} for task {task['step_id']}")

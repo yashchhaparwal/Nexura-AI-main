@@ -12,7 +12,7 @@ from google.genai import types
 import config
 from agents.llm import TRANSIENT, backoff_delay, call_with_deadline, quota_message
 from core.schemas import Acceptance, ExecutionPlan, Step  # noqa: F401  (re-exported for callers)
-from core.task_manager import validate_plan
+from core.task_manager import fix_root_url_checks, validate_plan
 
 load_dotenv()
 
@@ -305,6 +305,8 @@ output_contains(command, text), http_status(url, and usually start_command). Ret
             except Exception as e:  # API/network failure: not fixable by re-prompting
                 raise PlanError(f"Planner LLM call failed: {str(e)[:200]}") from e
 
+            if not context:   # a new project: a check on "/" for an app described by other routes is rewritten (existing projects: warning only)
+                self.last_warnings += fix_root_url_checks(plan_obj, user_prompt)
             md_path, json_path = self.save_plan(plan_obj, project_path)
             print(f"Plan (JSON) saved to: {json_path}")
             print(f"Plan (Markdown) saved to: {md_path}")
@@ -312,6 +314,8 @@ output_contains(command, text), http_status(url, and usually start_command). Ret
 
         repaired = self._repair(last_raw, extra_commands)
         if repaired is not None:
+            if not context:
+                self.last_warnings += fix_root_url_checks(repaired, user_prompt)
             md_path, json_path = self.save_plan(repaired, project_path)
             print(f"Plan (JSON) saved to: {json_path}")
             return repaired

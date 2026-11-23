@@ -68,11 +68,44 @@ _ROUTE = re.compile(r"(?<![\w.:/])/[A-Za-z_][\w\-/]*")      # '/health', '/users
 _ROOT_ROUTE_ASKED = re.compile(r"\b(?:GET|POST)\s+/(?![\w])|\broot\s+(?:route|path|url|endpoint|page)|\bhome\s?page\b|\bindex\s+page\b|\blanding\s+page\b", re.I)
 
 
+PREFERRED_CHECK_ROUTES = ("/health", "/healthz", "/ping", "/status")
+
+
+def named_routes(user_prompt: str) -> list[str]:
+    """Plain routes the request names, in order of appearance ('/health', '/users'); path parameters like /users/{id} are skipped."""
+    text, out = user_prompt or "", []
+    for m in _ROUTE.finditer(text):
+        route, nxt = m.group(0), text[m.end():m.end() + 1]
+        if nxt in ("{", ":", "<") or (route.endswith("/") and len(route) > 1) or route in out:
+            continue
+        out.append(route)
+    return out
+
+
+def fix_root_url_checks(plan, user_prompt: str) -> list[str]:
+    """NEW projects only. An http_status check on the bare root URL, for a request that names other routes and no root route, can only
+    get a 404 from an app that follows the request, and agents cannot change a check (a live run spent every retry on it). The check's
+    URL is rewritten to a route the request names (/health first, else the first one) and the change is reported as a plan warning,
+    so the user sees it when approving. `plan` is an ExecutionPlan; it is changed in place. Returns the warnings."""
+    named = named_routes(user_prompt)
+    if not named or _ROOT_ROUTE_ASKED.search(user_prompt or ""):
+        return []
+    target = next((r for r in PREFERRED_CHECK_ROUTES if r in named), named[0])
+    notes = []
+    for step in plan.steps:
+        for acc in step.acceptance:
+            if acc.type == "http_status" and acc.url and urlparse(acc.url).path in ("", "/"):
+                old, acc.url = acc.url, urlparse(acc.url)._replace(path=target).geturl()
+                notes.append(f"step {step.step_id}: changed the check URL from {old} to {acc.url}: your request names {', '.join(named[:4])} "
+                             f"and no root route, so a check on '/' would get a 404 that the agent cannot fix. Give feedback if you want another URL.")
+    return notes
+
+
 def root_url_warnings(plan: dict, user_prompt: str) -> list[str]:
     """An http_status check on the bare root URL for a request that only describes other routes (e.g. GET /health, GET /users).
     Such a check returns 404 for an app that follows the request, and the agents cannot change a check: a live run spent 4 retries
     on it. A warning only (the user sees it when approving the plan and can ask for a different URL), never a rejection."""
-    named = sorted(set(_ROUTE.findall(user_prompt or "")))
+    named = named_routes(user_prompt)
     if not named or _ROOT_ROUTE_ASKED.search(user_prompt or ""):
         return []
     out = []
