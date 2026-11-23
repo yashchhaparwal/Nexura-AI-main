@@ -9,6 +9,8 @@ RULES = [
     # also carries the server log, which may contain a bind error from a second server on the same port
     ("http_status_mismatch", r"expected \d+, got status \d+"),
     ("port_in_use", r"Address already in use|EADDRINUSE|Errno 98|WinError 10048|port is already allocated"),
+    # a check tried to connect and nothing was listening (before test_failure: the traceback of such a check also contains "assert")
+    ("server_not_running", r"ConnectionRefusedError|Connection refused|WinError 10061|actively refused|Failed to establish a new connection"),
     ("test_failure", r"AssertionError|FAILED|\d+ failed|Tests? failed|assert "),
 ]
 HINTS = {
@@ -18,6 +20,9 @@ HINTS = {
     "syntax_error": "There is a syntax error: re-read the file and fix the exact line reported.",
     "http_status_mismatch": "A check requests a URL and the app answered with the wrong status (404 = that route does not exist). The check, its URL and its port are fixed by the plan: change the CODE so that exact URL answers as expected (for example add the missing route). Do not change the port. (A bind error in the server log means an older copy of the app may still be running on that port; Nexura stops its own before a check, so look at the code first.)",
     "port_in_use": "The port is busy: use a different port or stop the process using it.",
+    "server_not_running": "A check could not connect: nothing was listening on that port while it ran. The step's servers are started by its http_status "
+                          "check (and kept up for the later checks of the same step) or must be left running by the step itself; a check cannot start one. "
+                          "Look for what stops the app from starting (import error, wrong module name, wrong port) and fix that.",
     "test_failure": "A test failed: read the assertion, compare expected vs actual, fix the code under test.",
     "unknown": "Read the error output carefully and fix the root cause.",
 }

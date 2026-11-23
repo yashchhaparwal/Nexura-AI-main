@@ -276,7 +276,7 @@ def task_picker_node(state: NexuraState, config: RunnableConfig) -> dict:
         # remove ALL previous messages (the add_messages reducer ignores a bare []), then start fresh
         "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), HumanMessage(content=prompt)],
         "task_status": status, "tool_calls_count": 0, "attempts": 0, "mode": "code", "pending": [], "task_lines": 0,
-        "approvals_rejected": 0,
+        "approvals_rejected": 0, "debug_looks": 0,
         "changed_files": [], "command_results": [], "verify_failure": None, "retry_hint": "",
         "task_outcome": None, "task_reason": None,
     }
@@ -326,6 +326,9 @@ def _idle_debug_round(state: NexuraState, task: dict) -> list[str] | None:
 
 def debugger_node(state: NexuraState, config: RunnableConfig) -> dict:
     """Builds a focused prompt from the failure and asks the Debugger for fixes (proposals only)."""
+    if state.get("debug_looks", 0) > 0:   # a look-only round just ran: the same attempt goes on, with what it saw (no fresh conversation)
+        print(f"  [Debugger] continuing attempt {state.get('attempts', 0)} after looking (round {state['debug_looks']})")
+        return _agent_turn(state, debugger.propose, "debugger", config)
     ctx, task = _ctx(config), _cur(state)
     names = list(dict.fromkeys(state.get("changed_files", [])
                                + [a["path"] for a in task.get("acceptance", []) if a.get("path")]
@@ -506,9 +509,11 @@ def execute_node(state: NexuraState, config: RunnableConfig) -> dict:
     changed = list(state.get("changed_files", []))
     commands = list(state.get("command_results", []))
     lines, completed = state.get("task_lines", 0), False
+    ran: list[str] = []
 
     for p in state["pending"]:
         action = Action(**p["action"])
+        ran.append(action.action)
         source = p.get("approved_by", "auto")
         ctx.allow_protected = bool(p.get("protected") and source == "user")   # only for an action the user approved
         try:
@@ -554,10 +559,16 @@ def execute_node(state: NexuraState, config: RunnableConfig) -> dict:
     if changes and ctx.indexer is not None:   # invariant: re-indexed before the next task's context is built
         _reindex(ctx, task["step_id"], [c["file"] for c in changes])
 
+    # A debugger round that only looked (list/read) changed nothing, so re-running the checks would fail the same way and the attempt
+    # would be spent (a live run: 2-4 attempts in a row). Let it go on, with what it saw, for a bounded number of rounds.
+    debugging = state.get("mode") == "debug"
+    looks = state.get("debug_looks", 0)
+    free_look = debugging and bool(ran) and all(t in READ_ONLY_TOOLS for t in ran) and not changes and looks < app_config.MAX_DEBUG_LOOKS
     update = {"messages": msgs, "pending": [], "tool_calls_count": count, "changed_files": changed, "task_lines": lines,
               "command_results": commands, "file_changes": state.get("file_changes", []) + changes,
               "execution_history": state["execution_history"] + hist,
-              "want_verify": completed or state.get("mode") == "debug"}
+              "want_verify": completed or (debugging and not free_look),
+              "debug_looks": looks + 1 if free_look else looks}
     if not update["want_verify"] and count >= app_config.MAX_TOOL_CALLS_PER_TASK:
         print(f"  [!] Hit max tool calls limit ({app_config.MAX_TOOL_CALLS_PER_TASK}). Failing task.")
         update.update(_fail(f"TOOL_CAP: {app_config.MAX_TOOL_CALLS_PER_TASK} tool calls without task_complete"))
@@ -567,7 +578,9 @@ def execute_node(state: NexuraState, config: RunnableConfig) -> dict:
 def route_after_execute(state: NexuraState) -> str:
     if state.get("task_outcome"):
         return "advance_task"
-    return "verify" if state.get("want_verify") else "coder"
+    if state.get("want_verify"):
+        return "verify"
+    return "debugger" if state.get("mode") == "debug" else "coder"   # debug: a look-only round, the same attempt goes on
 
 
 # ─── VERIFY / RETRY ─────────────────────────────────────────
@@ -588,7 +601,7 @@ def verify_node(state: NexuraState, config: RunnableConfig) -> dict:
     decision = retry_manager.decide(task, attempts, failure)
     entry = {**_hist(task, "verification", "", failure, "error"), "error_type": decision.error_type}
     ctx.emit("verification_failed", task["step_id"], error_type=decision.error_type, attempt=attempts, detail=_short(failure, 300))
-    update = {"attempts": attempts, "want_verify": False, "execution_history": state["execution_history"] + [entry]}
+    update = {"attempts": attempts, "want_verify": False, "debug_looks": 0, "execution_history": state["execution_history"] + [entry]}
     if decision.action == "fail":
         update.update(_fail(f"VERIFICATION_FAILED: {_short(failure, 300)}"))
     else:
@@ -674,7 +687,8 @@ def build_graph(interactive: bool = False, checkpointer: Any = None):
     b.add_conditional_edges("debugger", route_after_agent, agent_routes)
     b.add_conditional_edges("validate", route_after_validate, {
         "approval": "approval", "execute": "execute", "advance_task": "advance_task", "coder": "coder", "debugger": "debugger"})
-    b.add_conditional_edges("execute", route_after_execute, {"verify": "verify", "coder": "coder", "advance_task": "advance_task"})
+    b.add_conditional_edges("execute", route_after_execute, {"verify": "verify", "coder": "coder", "debugger": "debugger",
+                                                              "advance_task": "advance_task"})
     b.add_conditional_edges("verify", route_after_verify, {"advance_task": "advance_task", "debugger": "debugger"})
     b.add_edge("advance_task", "task_picker")
 

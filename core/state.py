@@ -69,3 +69,4 @@ class NexuraState(TypedDict):
     resuming: bool                   # True when a run is resumed: skip planning/review
     task_lines: int                  # changed lines so far in this task (risk limits)
     approvals_rejected: int          # user rejections in this task
+    debug_looks: int                 # look-only debugger rounds in the current attempt (they do not use up the attempt)

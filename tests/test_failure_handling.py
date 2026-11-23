@@ -442,3 +442,89 @@ def test_the_check_server_is_stopped_when_its_own_check_fails(run_ctx, workspace
         run_ctx, [], [])
     assert not r.ok and "got status 404" in r.failure_text()
     assert len(run_ctx.backend) == 0 and _status(port) is None
+
+
+# ─── a debugger round that only looks does not use up the attempt ───
+
+def _two_step_plan(monkeypatch):
+    import tests.test_persistence as tp
+    plan = {"project_id": "p", "goal": "g", "steps": [
+        {"step_id": 1, "title": "write app", "description": "d", "dependencies": [], "acceptance": [{"type": "file_exists", "path": "app.py"}]},
+        {"step_id": 2, "title": "check app", "description": "d", "dependencies": [1],
+         "acceptance": [{"type": "command_ok", "command": 'python -c "import app; assert app.ROUTE"'}]}]}
+    monkeypatch.setattr(tp, "PLAN", plan)
+
+
+def _run_with_debugger_script(env, debugger_rounds):    # noqa: F811
+    from langchain_core.messages import AIMessage
+    from langgraph.types import Command
+    from core.runner import start_run
+    from core.state_manager import make_checkpointer
+    from tests.conftest import tool_call_msg
+    env.llm.script[:] = [
+        AIMessage(content="", tool_calls=[{"name": "create_file", "args": {"target_file": "app.py", "content": "ROUTE = 0" + chr(10)}, "id": "a"},
+                                          {"name": "task_complete", "args": {"summary": "ok"}, "id": "b"}]),
+        tool_call_msg("task_complete", {"summary": "nothing to change"}, "c"),
+        *debugger_rounds]
+    ctx, state = start_run(env.sm, "proj", env.ws, "make app", require_git=False)
+    graph = env.build(checkpointer=make_checkpointer(env.ckpt_path))
+    cfg = {"configurable": {"thread_id": ctx.run_id, "project": ctx}, "recursion_limit": 300}
+    graph.invoke(state, cfg)
+    graph.invoke(Command(resume="yes"), cfg)
+    failures = [e for e in env.sm.list_events(ctx.run_id) if e["type"] == "verification_failed"]
+    return ctx, failures
+
+
+def test_a_look_then_a_fix_happens_in_one_attempt_with_the_same_conversation(env, monkeypatch):    # noqa: F811
+    from tests.conftest import tool_call_msg
+    _two_step_plan(monkeypatch)
+    look = tool_call_msg("list_directory", {"target_dir": "."}, "d1")
+    fix = tool_call_msg("patch_file", {"target_file": "app.py", "search_text": "ROUTE = 0", "replace_text": "ROUTE = 100"}, "d2")
+    ctx, failures = _run_with_debugger_script(env, [look, fix])
+    rows = {r["task_id"]: r["status"] for r in env.sm.list_tasks(ctx.run_id)}
+    assert rows == {1: "done", 2: "done"} and (env.ws / "app.py").read_text() == "ROUTE = 100" + chr(10)
+    assert len(failures) == 1                                   # the checks ran once before the fix and not again after the look
+    follow_up = env.llm.calls[3]                                # the second debugger call: the SAME attempt
+    text = " ".join(str(m.content) for m in follow_up)
+    assert "FAILING CHECKS" in text and "app.py" in text       # the original prompt is still there, plus what the look returned
+    assert len(follow_up) > len(env.llm.calls[2])               # the conversation grew instead of starting over
+
+
+def test_looking_is_bounded_so_the_checks_are_rerun_after_two_free_looks(env, monkeypatch):    # noqa: F811
+    from tests.conftest import tool_call_msg
+    _two_step_plan(monkeypatch)
+    looks = [tool_call_msg("list_directory", {"target_dir": "."}, f"l{i}") for i in range(3)]
+    fix = tool_call_msg("patch_file", {"target_file": "app.py", "search_text": "ROUTE = 0", "replace_text": "ROUTE = 100"}, "f")
+    ctx, failures = _run_with_debugger_script(env, [*looks, fix])
+    assert {r["task_id"]: r["status"] for r in env.sm.list_tasks(ctx.run_id)} == {1: "done", 2: "done"}
+    assert len(failures) == 2           # two free looks, the third look ended the attempt (checks re-run), the fix came in the next attempt
+    assert "only used list_directory" in str(env.llm.calls[5])   # and the next prompt says the last round only looked
+
+
+def test_the_coders_look_only_rounds_are_not_affected(env, monkeypatch):    # noqa: F811
+    """Only debugger rounds are free: the coder still ends its work with task_complete."""
+    from core.orchestrator import READ_ONLY_TOOLS
+    assert "list_directory" in READ_ONLY_TOOLS and "patch_file" not in READ_ONLY_TOOLS
+    import config
+    assert config.MAX_DEBUG_LOOKS == 2
+
+
+# ─── a refused connection is not "a test failed" ───
+
+REFUSED = ("requests.exceptions.ConnectionError: HTTPConnectionPool(host='127.0.0.1', port=8765): Max retries exceeded with url: /health "
+           "(Caused by NewConnectionError('Failed to establish a new connection: [WinError 10061] No connection could be made because the "
+           "target machine actively refused it'))")
+
+
+def test_a_refused_connection_is_classified_and_gets_an_honest_hint():
+    assert classify("- output_contains: `python -c ...` expected output containing 'ok'; exit=1; got: " + REFUSED) == "server_not_running"
+    assert classify("Traceback ... assert resp.ok" + chr(10) + "ConnectionRefusedError: [Errno 111] Connection refused") == "server_not_running"
+    hint = HINTS["server_not_running"]
+    assert "nothing was listening" in hint and "cannot start one" in hint and "a test failed" not in hint.lower()
+
+
+def test_the_new_category_does_not_steal_other_failures():
+    assert classify("AssertionError: 1 != 2") == "test_failure"
+    assert classify("ModuleNotFoundError: No module named 'fastapi'" + chr(10) + REFUSED) == "missing_dependency"
+    assert classify(MISMATCH) == "http_status_mismatch"
+    assert classify("OSError: [Errno 98] Address already in use") == "port_in_use"

@@ -66,6 +66,7 @@ def env_bool(name: str, default: bool, env=None) -> bool:
 MAX_RETRIES = 3
 LLM_MAX_ATTEMPTS = env_int("NEXURA_LLM_MAX_ATTEMPTS", 6)   # tries per model call on 429/5xx; backoff 5,10,20,40,60 s
 MAX_TOOL_CALLS_PER_TASK = 15
+MAX_DEBUG_LOOKS = 2   # look-only rounds (list/read) a debugger attempt may use before its fix; after that the checks are re-run
 MAX_REPLANS = 5
 FAILURE_POLICY = os.getenv("NEXURA_FAILURE_POLICY", "stop")  # stop | continue
 MAX_FILE_BYTES = 1_000_000
