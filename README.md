@@ -75,6 +75,7 @@ python main.py --project calc --prompt "..." --approval ask_every_edit     # con
 python main.py --resume <run_id>                                            # continue an unfinished run
 python main.py --undo <run_id> [--task N] [--confirm]                       # restore files from the checkpoints
 python main.py --metrics <run_id>                                           # success rate, retries, error types, time
+python main.py --project shop --deploy-config docker                        # write a Dockerfile + .dockerignore (or `procfile`) for the finished project
 python main.py --project shop --prompt "..." --baseline                     # run the project's tests before/after; report new failures
 python main.py --project shop --prompt "..." --commit                       # if every task is verified, commit the changes on a new branch nexura/<run_id> (never pushes)
 ```
@@ -104,6 +105,10 @@ Other V2 options: `NEXURA_PATCH_MODE=v2` (patches must match exactly one place, 
 `baseline: true` on runs / `--baseline` / the extension's question runs your test command before and after the run and marks
 the run `completed_with_failures` if a test that passed before now fails (tests that already failed are not blamed).
 Commands such as `poetry`, `yarn`, `pnpm`, `make`, `uv` need your one-time approval per workspace.
+
+## Deployment files (optional)
+
+`python main.py --project NAME --deploy-config docker` writes a `Dockerfile` and a `.dockerignore` into the project; `--deploy-config procfile` writes a `Procfile` (Render, Railway, Heroku and similar). It reads the project profile, uses no model and no network, and **only writes text files: it never builds an image and never deploys anything.** Existing files are kept unless you pass `--force`. The image runs as a non-root user, and `.env*`, keys and `.git` are kept out of it (only the *names* of the environment variables the project needs are written, as a comment). Supported: FastAPI, Flask, Streamlit, Django, plain Python scripts (with a `requirements.txt`), npm projects with a `start` script or an entry file, and static sites. Not supported, and then nothing is written: poetry/uv, yarn/pnpm, React/Vite/Vue/Next.js builds. The files are **not tested by Nexura against a real build**: run `docker build .` before you rely on them. No `vercel.json` is generated on purpose (Vercel detects most projects itself, and a wrong one can break a working deploy).
 
 ## Safety model
 

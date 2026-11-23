@@ -118,6 +118,10 @@ def main():
                         help="Run the project's own test command before and after the run and report new failures (regressions)")
     parser.add_argument("--commit", action="store_true",
                         help="When every task is verified, commit the changed files on a new branch nexura/<run_id> (never pushes)")
+    parser.add_argument("--deploy-config", choices=["docker", "procfile"],
+                        help="With --project: write a Dockerfile (+ .dockerignore) or a Procfile for the finished project, then exit. "
+                             "Writes text files only: nothing is built or deployed, and existing files are kept unless --force")
+    parser.add_argument("--force", action="store_true", help="With --deploy-config: replace files that already exist")
     parser.add_argument("--metrics", metavar="RUN_ID", help="Print metrics for a run and exit")
 
     args = parser.parse_args()
@@ -127,6 +131,11 @@ def main():
     if args.metrics:
         print(json.dumps(metrics.compute(sm, args.metrics), indent=2))
         return
+    if args.deploy_config:
+        if not args.project:
+            parser.error("--project is required with --deploy-config")
+        from core import deploy_config
+        sys.exit(deploy_config.cli(os.path.join(os.path.dirname(__file__), "workspace", args.project), args.deploy_config, args.force))
     if args.undo:
         res = runner.undo(sm, args.undo, args.task, args.confirm)
         if res.error:
