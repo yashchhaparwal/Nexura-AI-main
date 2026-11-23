@@ -31,3 +31,5 @@ extension/.vscode-test/
 ui/dist/
 .evalvenv/
 memory/index/
+# personal files that live next to the project (slides etc.), not part of Nexura
+btech_file/
