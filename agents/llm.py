@@ -35,10 +35,23 @@ def model_for(role: str) -> str:
     return config.model_name("coder")  # the debugger uses the coder's model
 
 
-def llm_with_tools(role: str):
+FAILOVER_AFTER = 2     # refusals in a row from one model before the next model is tried
+STICKY_S = 600         # after a switch, keep using the model that answered this long, then try the first one again
+_sticky: dict = {"model": "", "until": 0.0}
+
+
+def models_for(role: str) -> list[str]:
+    """The main model first, then the configured fallbacks (config.FALLBACK_MODELS). Just the main one when none are set."""
+    primary = model_for(role)
+    if _override is not None or not config.FALLBACK_MODELS:
+        return [primary]
+    return [primary] + [m for m in config.FALLBACK_MODELS if m != primary]
+
+
+def llm_with_tools(role: str, model: str | None = None):
     if _override is not None:
         return _override
-    name = model_for(role)
+    name = model or model_for(role)
     key = (name, config.PATCH_MODE)
     if key not in _cache:
         _cache[key] = get_llm(name).bind_tools(em.tool_schemas())
@@ -107,12 +120,20 @@ def call_with_deadline(fn, seconds: float | None = None):
 
 
 def invoke(role: str, messages: list, prompt_version: str, on_log=None) -> tuple[AIMessage | None, str | None]:
-    """Call the model. Returns (response, None) or (None, failure_reason). Rate limits retry with backoff."""
-    model = model_for(role)
-    detail = ""
-    for attempt in range(config.LLM_MAX_ATTEMPTS):
+    """Call the model. Returns (response, None) or (None, failure_reason). Rate limits retry with backoff. With fallback models
+    configured, a model that keeps refusing (or whose daily quota is used up) is replaced by the next one."""
+    models = models_for(role)
+    idx = models.index(_sticky["model"]) if _sticky["model"] in models and time.time() < _sticky["until"] else 0
+    refused_here, quota_hit, detail = 0, set(), ""
+    total = config.LLM_MAX_ATTEMPTS + 2 * (len(models) - 1)     # room to try every model, not only the first
+    for attempt in range(total):
+        model = models[idx]
         try:
-            response = call_with_deadline(lambda: llm_with_tools(role).invoke(messages))
+            response = call_with_deadline(lambda m=model: llm_with_tools(role, m).invoke(messages))
+            if len(models) > 1:
+                if idx and not (_sticky["model"] == model and time.time() < _sticky["until"]):
+                    print(f"  [!] using {model} (the main model {models[0]} was not answering); the main model is tried again in {STICKY_S // 60} min")
+                _sticky.update(model=models[idx] if idx else "", until=time.time() + STICKY_S if idx else 0.0)
             if on_log:
                 calls = [c["name"] for c in (getattr(response, "tool_calls", None) or [])]
                 usage = getattr(response, "usage_metadata", None) or {}
@@ -127,6 +148,11 @@ def invoke(role: str, messages: list, prompt_version: str, on_log=None) -> tuple
             err = str(e)
             quota = quota_message(err)
             if quota:
+                quota_hit.add(idx)
+                if len(quota_hit) < len(models):   # the daily quota is per model: another model may still have some left
+                    idx = next(i for i in range(len(models)) if i not in quota_hit)
+                    print(f"  [!] daily quota of {model} is used up; trying {models[idx]}")
+                    continue
                 if on_log:
                     on_log(role=role, prompt_version=prompt_version, model=model, result="quota_exhausted")
                 return None, quota
@@ -135,12 +161,17 @@ def invoke(role: str, messages: list, prompt_version: str, on_log=None) -> tuple
                     on_log(role=role, prompt_version=prompt_version, model=model, result="error")
                 return None, f"LLM_ERROR: {_short(err, 150)}"
             detail = _short(err, 150)
-            if attempt + 1 < config.LLM_MAX_ATTEMPTS:
+            refused_here += 1
+            if attempt + 1 < total:
                 if on_log:   # a failed attempt still counts against the provider's request quota: record it for the usage budget
                     on_log(role=role, prompt_version=prompt_version, model=model, result="retry_after_rate_limit")
+                if len(models) > 1 and refused_here >= FAILOVER_AFTER:
+                    idx, refused_here = (idx + 1) % len(models), 0
+                    print(f"  [!] {model} keeps refusing ({detail[:50]}...); trying {models[idx]}")
+                    continue   # a different model: no reason to wait first
                 wait = backoff_delay(attempt, err)
-                print(f"  [!] Rate limited (attempt {attempt + 1}/{config.LLM_MAX_ATTEMPTS}). Waiting {wait:.1f}s...")
+                print(f"  [!] Rate limited (attempt {attempt + 1}/{total}). Waiting {wait:.1f}s...")
                 time.sleep(wait)
     if on_log:
-        on_log(role=role, prompt_version=prompt_version, model=model, result="rate_limited")
+        on_log(role=role, prompt_version=prompt_version, model=models[idx], result="rate_limited")
     return None, f"LLM_UNAVAILABLE: {detail}"

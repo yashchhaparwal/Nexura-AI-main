@@ -632,8 +632,10 @@ def advance_task_node(state: NexuraState, config: RunnableConfig) -> dict:
         print(f"[Orchestrator] Task {task['step_id']} FAILED: {errors[sid]}")
 
     before = dict(status)
-    out_of_budget = outcome != "done" and errors.get(sid, "").startswith("BUDGET_REACHED")
-    nxt, status = pick_next(state["tasks"], status, "stop" if out_of_budget else None)   # no point starting the next task
+    reason_text = errors.get(sid, "") if outcome != "done" else ""
+    out_of_budget = reason_text.startswith("BUDGET_REACHED")
+    outage = reason_text.startswith("LLM_UNAVAILABLE")      # the model service refused every attempt: the plan is not at fault
+    nxt, status = pick_next(state["tasks"], status, "stop" if (out_of_budget or outage) else None)   # no point starting the next task
     if ctx.state_manager is not None:
         ctx.state_manager.mark_task(ctx.run_id, task["step_id"], status[sid], attempts=state.get("attempts", 0),
                                     reason=errors.get(sid))
@@ -652,6 +654,10 @@ def advance_task_node(state: NexuraState, config: RunnableConfig) -> dict:
         update["run_status"], note = _regression_check(ctx, update["run_status"])
         if out_of_budget:
             note = f"{errors[sid]} Paused: continue with `python main.py --resume {ctx.run_id}` once the budget allows."
+        elif outage:
+            note = (f"The model service refused every attempt (a temporary outage on its side, not a problem with your request or the plan): "
+                    f"{errors[sid][:160]} Nothing after this step was started. Continue with `python main.py --resume {ctx.run_id}` when it is back"
+                    f"; steps that are done stay done.")
         if note:
             update["run_error"] = note
         _commit_if_requested(ctx, state, update["run_status"])

@@ -64,6 +64,9 @@ def env_bool(name: str, default: bool, env=None) -> bool:
 
 # --- Limits ------------------------------------------------
 MAX_RETRIES = 3
+# Other models to try when the main one keeps refusing (temporary overload) or its daily quota is used up: "modelA,modelB". Off by default:
+# a model that was not checked for tool calling should not be picked for you. Applies to the coder/debugger.
+FALLBACK_MODELS = tuple(m.strip() for m in os.getenv("NEXURA_FALLBACK_MODELS", "").split(",") if m.strip())
 PLANNER_FALLBACK = env_bool("NEXURA_PLANNER_FALLBACK", True)   # after 2 failed structured plan requests, ask for the plan as plain text
 LLM_MAX_ATTEMPTS = env_int("NEXURA_LLM_MAX_ATTEMPTS", 6)   # tries per model call on 429/5xx; backoff 5,10,20,40,60 s
 MAX_TOOL_CALLS_PER_TASK = 15
