@@ -80,6 +80,9 @@ LLM_TIMEOUT_S = int(os.getenv("NEXURA_LLM_TIMEOUT_S", "120"))   # per model requ
 # connection (a live eval hung ~53 min). Above the client timeout x its internal retry, so a slow but alive call is not cut.
 LLM_HARD_TIMEOUT_S = int(os.getenv("NEXURA_LLM_HARD_TIMEOUT_S", str(2 * LLM_TIMEOUT_S + 30)))
 
+# Existing projects: also read the project's own .github/workflows files for its real test/lint commands (offline, nothing is run).
+CI_AWARE = env_bool("NEXURA_CI_AWARE", False)
+
 # --- Usage budget (free-tier quotas): counts model requests/tokens over a rolling window across ALL runs. Off by default. ---
 BUDGET_MAX_REQUESTS = env_limit("NEXURA_BUDGET_MAX_REQUESTS")   # e.g. 450 for a 500-requests/day key (leave a margin); 0 = no cap
 BUDGET_MAX_TOKENS = env_limit("NEXURA_BUDGET_MAX_TOKENS")       # 0 = no cap

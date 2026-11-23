@@ -154,6 +154,50 @@ def _makefile(root: Path, p: ProjectProfile) -> None:
             _add(p.run_commands, f"make {t}")
 
 
+_ARGS = r"(?: (?:-[-\w=.:/]+|[\w./:=-]+))*"      # plain words and flags only: no quotes, no shell operators, no variables
+CI_TEST = re.compile(r"(?:python3? -m pytest|pytest|python3? -m unittest|npm test|npm run test|yarn test|pnpm test|make test)" + _ARGS)
+CI_LINT = re.compile(r"(?:python3? -m ruff check|ruff check|python3? -m flake8|flake8|npm run lint|yarn lint|pnpm lint|make lint)" + _ARGS)
+MAX_CI_FILES, MAX_CI_BYTES = 10, 65_536
+
+
+def _ci_workflows(root: Path, p: ProjectProfile) -> None:
+    """Opt-in (NEXURA_CI_AWARE): the project's own GitHub Actions files say how it is really tested and linted. Only `run:` lines
+    that are EXACTLY a known test/lint command with plain arguments are taken (the file is data, never instructions); steps in another
+    working directory, lines with ${{ }} and anything with shell operators are ignored. Offline: nothing is fetched from GitHub, and
+    nothing is run here (the baseline run still needs the user's yes). CI commands are added AFTER the ones found in the manifests."""
+    if not config.CI_AWARE:
+        return
+    try:
+        import yaml
+        wf = root / ".github" / "workflows"
+        if wf.is_symlink() or not wf.is_dir():
+            return
+        for f in sorted(wf.iterdir())[:MAX_CI_FILES]:
+            if f.suffix.lower() not in (".yml", ".yaml") or f.is_symlink() or not f.is_file() or f.stat().st_size > MAX_CI_BYTES:
+                continue
+            try:
+                doc = yaml.safe_load(f.read_text(encoding="utf-8", errors="replace"))
+            except yaml.YAMLError:
+                continue
+            for job in (doc.get("jobs") or {}).values() if isinstance(doc, dict) and isinstance(doc.get("jobs"), dict) else []:
+                if not isinstance(job, dict):
+                    continue
+                for step in job.get("steps") or []:
+                    run = step.get("run") if isinstance(step, dict) else None
+                    if not isinstance(run, str) or str(step.get("working-directory") or "") not in ("", "."):
+                        continue
+                    for line in run.splitlines():
+                        line = line.strip().removeprefix("$ ").strip()
+                        if "${{" in line:
+                            continue
+                        if CI_TEST.fullmatch(line):
+                            _add(p.test_commands, line)
+                        elif CI_LINT.fullmatch(line) and not p.lint_command:
+                            p.lint_command = line
+    except Exception:     # best effort, like the rest of the detection: a surprising file must not stop a run
+        return
+
+
 def _readme_hints(root: Path, p: ProjectProfile) -> None:
     """Last resort for the test command: a README line that is exactly a known test command."""
     if p.test_commands:
@@ -199,6 +243,7 @@ def detect_profile(root: Path | str, subproject: str = "") -> ProjectProfile:
         _python(base, p)
         _node(base, p)
         _makefile(base, p)
+        _ci_workflows(base, p)
         _readme_hints(base, p)
         _env_needs(base, p)
     except Exception:       # detection is best-effort; a surprise in one file must not stop a run
