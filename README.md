@@ -9,7 +9,7 @@ your real folder safely: every task is checkpointed in git, risky changes wait f
 
 **V2 (optional, off by default)** adds code intelligence for existing projects: a local code index with hybrid retrieval,
 project profile and summary, multi-hunk patches, per-file diff review, and a before/after test run that catches regressions.
-Everything V2 sits behind flags whose defaults keep V1 behaviour. Code graphs and GitHub/CI/deploy features are not here; see
+Everything V2 sits behind flags whose defaults keep V1 behaviour. An opt-in code graph (where a function is used, name-based hints) and a local CI-aware profile exist; GitHub, live CI results and deploy features are not here; see
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## How a run works
@@ -55,6 +55,7 @@ copy .env.example .env            # then edit .env (never commit it)
 | `NEXURA_LLM_MAX_ATTEMPTS` | Tries per model call on rate limits / 503 "high demand" (default 6, backoff up to 60 s) |
 | `NEXURA_SCRUB_ENV`, `NEXURA_ENV_PASSTHROUGH` | Commands the agent runs get a copy of the environment WITHOUT credentials (any variable whose name has the word API_KEY, TOKEN, SECRET, PASSWORD, CREDENTIALS, ACCESS_KEY or PRIVATE_KEY, plus `SSH_AUTH_SOCK`), so code the model wrote cannot read your keys. On by default; `NEXURA_SCRUB_ENV=false` turns it off; `NEXURA_ENV_PASSTHROUGH=NAME1,NAME2` keeps the named variables |
 | `NEXURA_CI_AWARE` | `true` = for existing projects, also read the project's own `.github/workflows` files and add the test/lint commands they run (only exact known commands such as `python -m pytest -q`, `npm test`, `ruff check .` with plain arguments; nothing is fetched from GitHub and nothing is run by this; the baseline test run still needs your yes). Commands from the manifests stay first. Default `false` |
+| `NEXURA_CODE_GRAPH` | `true` (with `NEXURA_RETRIEVAL_MODE=v2` and a ready index) = the coder also gets a USAGES block: for the functions/classes of the files it sees, where else they are used, and which files import those files (2 levels). Paths and line numbers only, never code. Name-based: searched in the defining file and the files that import it, so it can include look-alikes (a local variable with the same name) and misses indirect uses (aliases, dynamic calls). Default `false` |
 | `NEXURA_LLM_HARD_TIMEOUT_S` | Hard wall-clock limit for one model call (default `2 x NEXURA_LLM_TIMEOUT_S + 30` = 270 s). A call that stalls longer is abandoned and retried like any timeout, so a dead connection cannot hang a run |
 | `NEXURA_RETRIEVAL_MODE` | `v1` (default) or `v2`: retrieval context and a planner that knows the project (needs the index; falls back to v1). v2 also asks the planner for behaviour checks (not only syntax) and render-checks changed Streamlit pages |
 | `NEXURA_INDEXING_ENABLED` | `false` (default) or `true`: build/use the local code index |
@@ -132,7 +133,7 @@ cd extension && npm run setup && npm test   # build + end-to-end VS Code smoke t
 Layout: `agents/` (planner, coder, debugger, llm access), `core/` (orchestrator, validator, execution manager, verification,
 approvals, checkpoints, state manager, runner, run manager), `tools/` (file, directory, system, verification, search tools),
 `server.py` (API), `main.py` (CLI), `extension/` + `ui/` (VS Code extension and sidebar), `evals/`, `tests/`, `docs/`.
-`rag/` is the V2 code index and retrieval (`graph_rag.py` stays empty) and `tools/github_tool.py` is unused (V3).
+`rag/` is the V2 code index and retrieval plus `graph_rag.py` (V3, opt-in usages and impact hints, standard library only); `tools/github_tool.py` is unused (V3).
 
 ## Known limits
 

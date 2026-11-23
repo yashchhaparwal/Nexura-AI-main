@@ -41,7 +41,7 @@ Modules:
 
 | Area | Files |
 |---|---|
-| Index | `rag/chunker.py`, `embedder.py`, `vector_store.py`, `lexical_index.py`, `import_map.py`, `indexer.py` (Indexer, IndexManager), `retriever.py` |
+| Index | `rag/chunker.py`, `embedder.py`, `vector_store.py`, `lexical_index.py`, `import_map.py`, `indexer.py` (Indexer, IndexManager), `retriever.py`, `graph_rag.py` (V3: usages and import impact, opt-in) |
 | Context | `core/context_builder.py` (V1 builder, `build_task_context`, v2 builder), `core/planner_context.py` (summary, planner context) |
 | Existing projects | `core/project_profile.py`, `core/baseline.py`, `core/patching.py`, `core/safety.py` (`parse_command(extra_allowed=...)`) |
 | Execution seam | `core/execution_backend.py` (`ExecutionBackend`, `LocalBackend`) |
@@ -62,5 +62,5 @@ With the defaults the behaviour is V1's (a test asserts the V1 context byte for 
 
 ## What is deliberately not here
 
-No graph retrieval (`rag/graph_rag.py` is empty), no GitHub/CI/deploy tools (`tools/github_tool.py` is unused), no cloud
+No type-aware call graph (`rag/graph_rag.py` only offers opt-in, name-based usages and import impact; see `NEXURA_CODE_GRAPH`), no GitHub/live-CI/deploy tools (`tools/github_tool.py` is unused), no cloud
 embeddings, no `WorkspaceEdit`, no container sandbox (only the `ExecutionBackend` seam exists).

@@ -97,6 +97,7 @@ def build_context(task: dict, root: Path | str, changed_files: list[str] | None 
 
 V2_TREE_SHARE = 0.1          # file list: at most this share of the budget
 V2_IMPORT_SHARE = 0.1        # import hints: at most this share
+V2_GRAPH_SHARE = 0.1         # usages (code graph, opt-in): at most this share
 REFERENCE = "reference only: use read_file before editing"
 
 
@@ -166,6 +167,8 @@ def build_context_v2(task: dict, ctx, changed_files: list[str], ix, budget: int 
     results = ix.retriever().retrieve(query, k=config.TOP_K * 2, named_paths=named, recent_paths=changed_files)
 
     parts, used, sections = [], 0, {"files": 0, "named": 0, "retrieved": 0, "imports": 0}
+    if config.CODE_GRAPH:    # with the flag off the breakdown has exactly the V2 shape
+        sections["usages"] = 0
     dropped_budget = dropped_unsafe = 0
 
     def put(block: str, section: str) -> bool:
@@ -231,9 +234,25 @@ def build_context_v2(task: dict, ctx, changed_files: list[str], ix, budget: int 
         cap = int(budget * V2_IMPORT_SHARE)
         put(block if len(block) <= cap else block[:cap] + "\n...", "imports")
 
+    usage_lines: list[str] = []
+    if config.CODE_GRAPH:   # opt-in; a hint only, so any problem here must never fail the run
+        try:
+            from rag.graph_rag import CodeGraph
+            usage_lines = CodeGraph(ix.lexical, ix.imports).summary(
+                list(dict.fromkeys(shown_full)), allow=lambda p: not (is_ignored(p, patterns) or is_protected(p, config.PROTECTED_PATHS)))
+        except Exception as e:
+            ctx.emit("code_graph_failed", task.get("step_id"), reason=redact_secrets(f"{type(e).__name__}: {e}")[:200])
+    if usage_lines:
+        block = ("\n========================\nUSAGES (where the code in the files above is also used: name-based hints, they can include "
+                 "look-alikes and miss indirect uses; check with read_file before relying on them)\n========================\n" + "\n".join(usage_lines))
+        cap = int(budget * V2_GRAPH_SHARE)
+        put(block if len(block) <= cap else block[:cap] + "\n...", "usages")
+
     ctx.emit("retrieval", task.get("step_id"), query=redact_secrets(query)[:200], results=log[:20],
              included=len(included), dropped_for_budget=dropped_budget, dropped_unsafe=dropped_unsafe)
     breakdown = {"mode": "v2", "files": len(files), "named": len(shown_full), "retrieved": len(included),
                  "dropped_for_budget": dropped_budget, "dropped_unsafe": dropped_unsafe, "import_hints": len(hints),
                  "chars": used, "budget": budget, "sections": sections}
+    if config.CODE_GRAPH:
+        breakdown["usage_files"] = len([ln for ln in usage_lines if not ln.startswith(" ")])
     return "\n".join(parts), breakdown

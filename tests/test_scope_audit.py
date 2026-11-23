@@ -22,8 +22,18 @@ V2_RAG_MODULES = {"chunker.py", "embedder.py", "vector_store.py", "lexical_index
                   "graph_rag.py", "__init__.py"}
 
 
-def test_graph_rag_stays_empty_and_rag_has_only_planned_modules():
-    assert (ROOT / "rag" / "graph_rag.py").stat().st_size == 0, "rag/graph_rag.py must remain empty (V3)"
+def test_graph_rag_is_standard_library_only_and_rag_has_only_planned_modules():
+    """V3 code graph: rag/graph_rag.py may now exist (usages/impact from the index's own tables), but it must stay free of graph or
+    vector libraries and of any third-party import: standard library only."""
+    import sys
+    tree = ast.parse((ROOT / "rag" / "graph_rag.py").read_text(encoding="utf-8"))
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            imported.add(node.module.split(".")[0])
+    assert imported <= set(sys.stdlib_module_names), f"rag/graph_rag.py may only import the standard library: {imported - set(sys.stdlib_module_names)}"
     present = {p.name for p in (ROOT / "rag").iterdir() if p.is_file() and p.suffix == ".py"}
     assert present <= V2_RAG_MODULES, f"unplanned modules in rag/: {present - V2_RAG_MODULES}"
 
