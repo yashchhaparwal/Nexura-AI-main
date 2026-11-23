@@ -92,6 +92,7 @@ def planner(monkeypatch, tmp_path):
             raise r
         return r
     p.call_llm = fake
+    p.call_llm_plain = fake   # the plain-text fallback reads the same scripted replies (no test ever reaches the network)
     p.path = str(tmp_path / "ws")
     return p
 
@@ -134,9 +135,11 @@ def test_planner_permanent_api_failure_is_not_retried(planner):
 
 
 def test_planner_retries_transient_api_errors_with_backoff(planner, monkeypatch):
-    """A Gemini '503 high demand' used to kill the run instantly."""
+    """A Gemini '503 high demand' used to kill the run instantly. (Checked with the plain-text fallback off: it has its own tests.)"""
     import time
+    import config
     sleeps = []
+    monkeypatch.setattr(config, "PLANNER_FALLBACK", False)
     monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
     planner.replies = [RuntimeError("503 UNAVAILABLE. This model is currently experiencing high demand."), RuntimeError("429 RESOURCE_EXHAUSTED"), GOOD]
     assert len(planner.plan("x", planner.path).steps) == 2
@@ -253,3 +256,122 @@ def test_planner_node_records_warnings_in_the_plan(monkeypatch, planner):
     cfg = {"configurable": {"project": ProjectContext(run_id="r", root=planner.path)}}
     out = planner_node({"user_prompt": "x", "workspace_path": planner.path}, cfg)
     assert any("cat a.txt" in w for w in out["plan"]["warnings"]) and out["tasks"][0]["acceptance"][0]["type"] == "file_exists"
+
+
+# ─── plain-text fallback when structured plan requests keep failing ───
+
+def _fallback_setup(planner, monkeypatch):
+    import time
+    sleeps = []
+    monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+    calls = {"structured": 0, "plain": 0}
+    return sleeps, calls
+
+
+def test_after_two_structured_failures_the_plan_is_requested_as_plain_text(planner, monkeypatch):
+    from agents.planner import FALLBACK_WARNING
+    sleeps, calls = _fallback_setup(planner, monkeypatch)
+
+    def structured(prompt):
+        calls["structured"] += 1
+        raise RuntimeError("503 UNAVAILABLE. This model is currently experiencing high demand.")
+
+    def plain(prompt):
+        calls["plain"] += 1
+        return GOOD
+    planner.call_llm, planner.call_llm_plain = structured, plain
+    out = planner.plan("x", planner.path)
+    assert len(out.steps) == 2
+    assert calls == {"structured": 2, "plain": 1}                  # two tries, then the other kind of request
+    assert len(sleeps) == 1                                         # one wait after the first failure, none before switching
+    assert planner.requests == 3 and planner.fallback_used and FALLBACK_WARNING in planner.last_warnings
+
+
+def test_a_single_transient_failure_does_not_trigger_the_fallback(planner, monkeypatch):
+    sleeps, calls = _fallback_setup(planner, monkeypatch)
+    replies = [RuntimeError("503 UNAVAILABLE"), GOOD]
+
+    def structured(prompt):
+        calls["structured"] += 1
+        r = replies.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+    planner.call_llm = structured
+    planner.call_llm_plain = lambda prompt: pytest.fail("the plain request must not be used")
+    assert len(planner.plan("x", planner.path).steps) == 2
+    assert calls["structured"] == 2 and not planner.fallback_used and planner.last_warnings == []
+
+
+def test_the_fallback_can_be_switched_off(planner, monkeypatch):
+    import config
+    from agents.planner import PlanError
+    sleeps, calls = _fallback_setup(planner, monkeypatch)
+    monkeypatch.setattr(config, "PLANNER_FALLBACK", False)
+
+    def structured(prompt):
+        calls["structured"] += 1
+        raise RuntimeError("503 UNAVAILABLE")
+    planner.call_llm = structured
+    planner.call_llm_plain = lambda prompt: pytest.fail("the plain request must not be used")
+    with pytest.raises(PlanError, match="LLM call failed"):
+        planner.plan("x", planner.path)
+    assert calls["structured"] == config.LLM_MAX_ATTEMPTS and not planner.fallback_used
+
+
+def test_real_errors_are_not_retried_in_plain_mode_either(planner, monkeypatch):
+    from agents.planner import PlanError
+    sleeps, calls = _fallback_setup(planner, monkeypatch)
+
+    def structured(prompt):
+        calls["structured"] += 1
+        raise RuntimeError("401 API key not valid")
+    planner.call_llm = structured
+    planner.call_llm_plain = lambda prompt: pytest.fail("a bad key is not a reason to try the plain request")
+    with pytest.raises(PlanError):
+        planner.plan("x", planner.path)
+    assert calls["structured"] == 1 and sleeps == []
+
+
+def test_a_plain_answer_goes_through_the_same_validation_and_repair(planner, monkeypatch):
+    """Fenced JSON is accepted; an invalid plan is sent back with the error, exactly like a structured one."""
+    sleeps, calls = _fallback_setup(planner, monkeypatch)
+    nl = chr(10)
+    planner.call_llm = lambda prompt: (_ for _ in ()).throw(RuntimeError("503 UNAVAILABLE"))
+    bad = json.dumps({"project_id": "p", "goal": "g", "steps": []})                      # no steps: invalid
+    replies = [bad, "```json" + nl + GOOD + nl + "```"]
+
+    def plain(prompt):
+        calls["plain"] += 1
+        return replies.pop(0)
+    planner.call_llm_plain = plain
+    out = planner.plan("x", planner.path)
+    assert len(out.steps) == 2 and calls["plain"] == 2 and planner.fallback_used
+
+
+def test_the_plain_request_really_has_no_structured_mode_and_counts_tokens(monkeypatch, tmp_path):
+    monkeypatch.setenv("PLANNER_MODEL_NAME", "m")
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy")
+    from agents.planner import PlannerAgent
+    seen = []
+
+    class Resp:
+        text = " {} "
+
+        class usage_metadata:
+            total_token_count = 123
+
+    class Models:
+        def generate_content(self, **kw):
+            seen.append(kw["config"])
+            return Resp()
+
+    class Client:
+        models = Models()
+    p = PlannerAgent()
+    p.client = Client()
+    assert p.call_llm("x") == "{}" and p.call_llm_plain("x") == "{}"
+    structured, plain = seen
+    assert structured.response_schema is not None and structured.response_mime_type == "application/json"
+    assert plain.response_schema is None and plain.response_mime_type is None             # an ordinary request
+    assert p.tokens == 246

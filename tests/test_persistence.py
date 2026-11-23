@@ -129,7 +129,7 @@ def test_plan_md_marks_failed_and_pending():
 def test_logs_redact_secrets(tmp_path):
     from core.runlog import RunLogger
     lg = RunLogger(tmp_path / "l.jsonl", "p", "r")
-    lg.log(agent="coder", input_summary="key AIzaSyA12345678901234567890123456789012345 password: hunter2hunter2", result="x" * 5000)
+    lg.log(agent="coder", input_summary="key " + "AIza" + "B" * 35 + " password: " + "hunter2" * 2, result="x" * 5000)
     rec = lg.read()[0]
     assert "AIza" not in rec["input_summary"] and "hunter2" not in rec["input_summary"] and len(rec["result"]) < 700
     assert "[REDACTED]" in redact_secrets("ghp_" + "a" * 36)

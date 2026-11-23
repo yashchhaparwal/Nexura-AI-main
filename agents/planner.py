@@ -17,6 +17,9 @@ from core.task_manager import fix_root_url_checks, validate_plan
 load_dotenv()
 
 PLAN_ATTEMPTS = 3  # first try + 2 retries with the error fed back
+STRUCTURED_TRIES = 2   # transient failures of the structured-output request before the plain-text fallback is tried
+FALLBACK_WARNING = ("the model refused the structured plan request (temporary overload), so the plan was requested as plain text; "
+                    "it was parsed and validated exactly like a structured one, but read it carefully.")
 
 
 class PlanError(RuntimeError):
@@ -182,6 +185,8 @@ class PlannerAgent:
                        if self.api_key else None)
         self.requests = 0   # model requests made by this planner (every attempt counts against the quota)
         self.tokens = 0     # tokens the API reported
+        self.use_plain = False       # True once structured output kept failing: the plan is then asked for as plain text
+        self.fallback_used = False   # reported to the user as a plan warning
 
     def _note_tokens(self, response) -> None:
         try:
@@ -206,6 +211,17 @@ class PlannerAgent:
         self._note_tokens(response)
         return response.text.strip()
 
+    def call_llm_plain(self, prompt: str) -> str:
+        """The same plan request WITHOUT structured-output mode: the prompt already carries the JSON format instructions, and the
+        answer goes through the same parsing and validation. Used when the provider keeps refusing structured requests (a live
+        day: plain requests answered, every structured one got 503)."""
+        if not self.client:
+            raise ValueError("GenAI Client is not initialized.")
+        response = self.client.models.generate_content(
+            model=self.model_name, contents=prompt, config=types.GenerateContentConfig(temperature=config.TEMPERATURE))
+        self._note_tokens(response)
+        return (response.text or "").strip()
+
     def call_text(self, prompt: str) -> str:
         """Plain-text completion with the planner's model (used for the repo summary)."""
         if not self.client:
@@ -218,10 +234,12 @@ class PlannerAgent:
 
     def _call_with_retry(self, prompt: str) -> str:
         """Transient API errors (rate limit, 5xx 'high demand', timeouts) are retried with backoff; others fail at once."""
+        structured_failures = 0
         for attempt in range(config.LLM_MAX_ATTEMPTS):
             self.requests += 1
+            call = self.call_llm_plain if self.use_plain else self.call_llm
             try:
-                return call_with_deadline(lambda: self.call_llm(prompt))   # a stalled connection raises a retryable timeout
+                return call_with_deadline(lambda fn=call: fn(prompt))   # a stalled connection raises a retryable timeout
             except Exception as e:
                 text = str(e)
                 quota = quota_message(text)
@@ -229,6 +247,12 @@ class PlannerAgent:
                     raise RuntimeError(quota) from e
                 if attempt + 1 >= config.LLM_MAX_ATTEMPTS or not TRANSIENT.search(text):
                     raise
+                if not self.use_plain and config.PLANNER_FALLBACK:
+                    structured_failures += 1
+                    if structured_failures >= STRUCTURED_TRIES:   # a different kind of request: no point waiting first
+                        self.use_plain = self.fallback_used = True
+                        print(f"[Planner] structured output failed {structured_failures} times ({text[:60]}...); asking for the plan as plain text")
+                        continue
                 wait = backoff_delay(attempt, text)
                 print(f"[Planner] transient API error ({text[:80]}...), retrying in {wait:.0f}s")
                 time.sleep(wait)
@@ -305,6 +329,8 @@ output_contains(command, text), http_status(url, and usually start_command). Ret
             except Exception as e:  # API/network failure: not fixable by re-prompting
                 raise PlanError(f"Planner LLM call failed: {str(e)[:200]}") from e
 
+            if self.fallback_used:
+                self.last_warnings.append(FALLBACK_WARNING)
             if not context:   # a new project: a check on "/" for an app described by other routes is rewritten (existing projects: warning only)
                 self.last_warnings += fix_root_url_checks(plan_obj, user_prompt)
             md_path, json_path = self.save_plan(plan_obj, project_path)
@@ -314,6 +340,8 @@ output_contains(command, text), http_status(url, and usually start_command). Ret
 
         repaired = self._repair(last_raw, extra_commands)
         if repaired is not None:
+            if self.fallback_used:
+                self.last_warnings.append(FALLBACK_WARNING)
             if not context:
                 self.last_warnings += fix_root_url_checks(repaired, user_prompt)
             md_path, json_path = self.save_plan(repaired, project_path)
