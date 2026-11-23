@@ -52,7 +52,10 @@ def _short(text: Any, n: int = 200) -> str:
 
 # Errors worth retrying with backoff: rate limits, server overload (5xx / "high demand"), timeouts
 TRANSIENT = re.compile(r"\b(429|500|502|503|504)\b|UNAVAILABLE|RESOURCE_EXHAUSTED|DEADLINE_EXCEEDED|timed? ?out|overloaded|"
-                       r"ConnectionError|ReadError|RemoteProtocolError", re.IGNORECASE)
+                       r"ConnectionError|ReadError|RemoteProtocolError|"
+                       # a dropped connection is as temporary as a timeout (a live run ended with WinError 10054 on its first call)
+                       r"WinError 1005[34]|forcibly closed|Connection (?:reset|aborted)|ConnectionReset|ConnectionAborted|RemoteDisconnected|Errno 104",
+                       re.IGNORECASE)
 
 
 QUOTA = re.compile(r"PerDay|per day", re.IGNORECASE)    # per-MINUTE limits ("tokens per minute ... exceeded on Free Tier") are transient

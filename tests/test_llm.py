@@ -29,7 +29,10 @@ def test_google_and_groq_clients_get_an_explicit_timeout(monkeypatch):
 @pytest.mark.parametrize("text,transient", [
     ("503 UNAVAILABLE. This model is currently experiencing high demand.", True), ("Request timed out.", True),
     ("429 RESOURCE_EXHAUSTED", True), ("httpx.ReadError: connection closed", True), ("ConnectionError: reset", True),
-    ("401 API key not valid", False), ("400 invalid argument", False)])
+    ("[WinError 10054] An existing connection was forcibly closed by the remote host", True),
+    ("[WinError 10053] An established connection was aborted by the software in your host machine", True),
+    ("ConnectionResetError: [Errno 104] Connection reset by peer", True), ("http.client.RemoteDisconnected: Remote end closed connection", True),
+    ("401 API key not valid", False), ("400 invalid argument", False), ("403 permission denied for this key", False)])
 def test_transient_classification(text, transient):
     assert llm.is_rate_limit(text) is transient
 
@@ -184,3 +187,50 @@ def test_planner_client_uses_v1beta_so_preview_models_work(monkeypatch):
     from agents.planner import PlannerAgent
     opts = PlannerAgent().client._api_client._http_options
     assert opts.api_version == "v1beta"
+
+
+def test_a_dropped_connection_is_retried_like_a_timeout_instead_of_ending_the_run(monkeypatch):
+    """A live run died on its very first model call with WinError 10054 (3 steps lost); a reset connection is temporary."""
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    logged = []
+    reset = "[WinError 10054] An existing connection was forcibly closed by the remote host"
+    monkeypatch.setattr(llm, "_override", FakeChatModel(script=[ConnectionResetError(reset), Exception(reset),
+                                                                tool_call_msg("task_complete", {"summary": "x"})], calls=[]))
+    resp, failure = llm.invoke("coder", ["hi"], "1", on_log=lambda **kw: logged.append(kw["result"]))
+    assert failure is None and resp.tool_calls[0]["name"] == "task_complete"
+    assert logged == ["retry_after_rate_limit", "retry_after_rate_limit", "ok"]
+
+
+def test_a_connection_that_keeps_dropping_fails_cleanly_after_the_allowed_attempts(monkeypatch):
+    monkeypatch.setattr(config, "LLM_MAX_ATTEMPTS", 3)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    reset = "[WinError 10054] An existing connection was forcibly closed by the remote host"
+    fake = FakeChatModel(script=[Exception(reset)] * 3, calls=[])
+    monkeypatch.setattr(llm, "_override", fake)
+    resp, failure = llm.invoke("coder", ["hi"], "1")
+    assert resp is None and failure.startswith("LLM_UNAVAILABLE") and "10054" in failure and len(fake.calls) == 3
+
+
+def test_a_real_error_is_still_not_retried(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda s: pytest.fail("must not retry or sleep"))
+    fake = FakeChatModel(script=[Exception("401 API key not valid")], calls=[])
+    monkeypatch.setattr(llm, "_override", fake)
+    resp, failure = llm.invoke("coder", ["hi"], "1")
+    assert resp is None and failure.startswith("LLM_ERROR") and len(fake.calls) == 1
+
+
+def test_the_planner_retries_a_dropped_connection_too(tmp_path, monkeypatch):
+    monkeypatch.setenv("PLANNER_MODEL_NAME", "m")
+    monkeypatch.setenv("GOOGLE_API_KEY", "dummy")
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    from agents.planner import PlannerAgent
+    p = PlannerAgent()
+    calls = []
+
+    def call_llm(prompt):
+        calls.append(1)
+        if len(calls) == 1:
+            raise ConnectionResetError("[WinError 10054] An existing connection was forcibly closed by the remote host")
+        return '{"ok": true}'
+    p.call_llm = call_llm
+    assert p._call_with_retry("x") == '{"ok": true}' and len(calls) == 2 and p.requests == 2
